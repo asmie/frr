@@ -1384,53 +1384,22 @@ void bfd_recv_cb(struct event *t)
 		return;
 	}
 
-	/*
-	 * Multi hop: validate packet TTL.
-	 * Single hop: set local address that received the packet.
-	 *             set peers mac address for echo packets
-	 */
-	if (is_mhop) {
-		if (ttl < bfd->mh_ttl) {
-			frrtrace(7, frr_bfd, packet_ttl_exceeded, is_mhop, &peer, &local, ifindex,
-				 vrfid, ttl, bfd->mh_ttl);
-			cp_debug(is_mhop, &peer, &local, ifindex, vrfid,
-				 "exceeded max hop count (expected %d, got %d)",
-				 bfd->mh_ttl, ttl);
-			bfd->stats.rx_bad_ctrl_pkt++;
-			return;
-		}
-	} else {
-
-		if (bfd->local_address.sa_sin.sin_family == AF_UNSPEC)
-			bfd->local_address = local;
-#ifdef BFD_LINUX
-		if (ifp)
-			bfd_peer_mac_set(sd, bfd, &peer, ifp);
-#endif
+	/* Multi hop: validate packet TTL. */
+	if (is_mhop && ttl < bfd->mh_ttl) {
+		frrtrace(7, frr_bfd, packet_ttl_exceeded, is_mhop, &peer, &local, ifindex, vrfid,
+			 ttl, bfd->mh_ttl);
+		cp_debug(is_mhop, &peer, &local, ifindex, vrfid,
+			 "exceeded max hop count (expected %d, got %d)", bfd->mh_ttl, ttl);
+		bfd->stats.rx_bad_ctrl_pkt++;
+		return;
 	}
 
 	bfd->stats.rx_ctrl_pkt++;
 
 	/*
-	 * If no interface was detected, save the interface where the
-	 * packet came in.
+	 * Authenticate before learning anything from the packet, so that a
+	 * forged one cannot move the remote discriminator or the addresses.
 	 */
-	if (!is_mhop && bfd->ifp == NULL)
-		bfd->ifp = ifp;
-
-	/* Log remote discriminator changes. */
-	if ((bfd->discrs.remote_discr != 0) &&
-	    (bfd->discrs.remote_discr != ntohl(cp->discrs.my_discr))) {
-		frrtrace(8, frr_bfd, remote_discriminator_change, bfd, bfd->discrs.remote_discr,
-			 ntohl(cp->discrs.my_discr), is_mhop, &peer, &local, ifindex, vrfid);
-		cp_debug(is_mhop, &peer, &local, ifindex, vrfid,
-			 "remote discriminator mismatch (expected %u, got %u)",
-			 bfd->discrs.remote_discr, ntohl(cp->discrs.my_discr));
-	}
-
-	bfd->discrs.remote_discr = ntohl(cp->discrs.my_discr);
-
-	/* Check authentication. */
 	if (!bfd_check_auth(bfd, cp)) {
 		/* Extract auth type from packet for tracing */
 		uint8_t auth_type __attribute__((unused)) = BFD_AUTH_TYPE_RESERVED;
@@ -1450,6 +1419,33 @@ void bfd_recv_cb(struct event *t)
 		bfd->stats.rx_pkt_authentication_failure++;
 		return;
 	}
+
+	/*
+	 * Single hop: learn the local address the packet came in on, the
+	 * peer's MAC for echo, and the interface if none was configured.
+	 */
+	if (!is_mhop) {
+		if (bfd->local_address.sa_sin.sin_family == AF_UNSPEC)
+			bfd->local_address = local;
+#ifdef BFD_LINUX
+		if (ifp)
+			bfd_peer_mac_set(sd, bfd, &peer, ifp);
+#endif
+		if (bfd->ifp == NULL)
+			bfd->ifp = ifp;
+	}
+
+	/* Log remote discriminator changes. */
+	if ((bfd->discrs.remote_discr != 0) &&
+	    (bfd->discrs.remote_discr != ntohl(cp->discrs.my_discr))) {
+		frrtrace(8, frr_bfd, remote_discriminator_change, bfd, bfd->discrs.remote_discr,
+			 ntohl(cp->discrs.my_discr), is_mhop, &peer, &local, ifindex, vrfid);
+		cp_debug(is_mhop, &peer, &local, ifindex, vrfid,
+			 "remote discriminator mismatch (expected %u, got %u)",
+			 bfd->discrs.remote_discr, ntohl(cp->discrs.my_discr));
+	}
+
+	bfd->discrs.remote_discr = ntohl(cp->discrs.my_discr);
 
 	/* Save remote diagnostics before state switch. */
 	bfd->remote_diag = CHECK_FLAG(cp->diag, BFD_DIAGMASK);
