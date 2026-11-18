@@ -11,9 +11,9 @@ implementation would never send.
 
 bfdd on the other end cannot be made to emit an out-of-window sequence
 number, so a replay window cannot be tested by two routers alone. This
-speaks enough of RFC 5880 to bring one session up with keyed SHA1
-authentication, and can then hold, rewind, or advance its sequence number
-past the window the RFC allows.
+speaks enough of RFC 5880 to bring one session up with keyed SHA1 or simple
+password authentication, and can then hold, rewind, or advance its sequence
+number past the window the RFC allows.
 
 Standard library only.
 """
@@ -30,6 +30,7 @@ VERSION = 1
 STATE_DOWN, STATE_INIT, STATE_UP = 1, 2, 3
 STATE_NAME = {0: "AdminDown", 1: "Down", 2: "Init", 3: "Up"}
 
+AUTH_SIMPLE_PASSWORD = 1
 AUTH_KEYED_SHA1 = 4
 AUTH_METICULOUS_KEYED_SHA1 = 5
 AUTH_SECTION_LEN = 28
@@ -44,9 +45,15 @@ BFD_SOURCE_PORT = 49152
 
 def control_packet(my_disc, your_disc, state, mult, tx_us, rx_us, key, seq, auth_type,
                    key_id):
-    """Build a control packet, with a keyed SHA1 auth section when keyed."""
+    """Build a control packet, with an auth section when keyed."""
+    if not key:
+        section_len = 0
+    elif auth_type == AUTH_SIMPLE_PASSWORD:
+        section_len = 3 + len(key)
+    else:
+        section_len = AUTH_SECTION_LEN
     flags = FLAG_AUTH if key else 0
-    length = 24 + (AUTH_SECTION_LEN if key else 0)
+    length = 24 + section_len
     header = struct.pack(
         "!BBBBIIIII",
         VERSION << 5,
@@ -61,6 +68,8 @@ def control_packet(my_disc, your_disc, state, mult, tx_us, rx_us, key, seq, auth
     )
     if not key:
         return header
+    if auth_type == AUTH_SIMPLE_PASSWORD:
+        return header + struct.pack("!BBB", auth_type, section_len, key_id) + key
 
     section = struct.pack("!BBBBI", auth_type, AUTH_SECTION_LEN, key_id, 0, seq)
     packet = bytearray(header + section + b"\x00" * DIGEST_LEN)
@@ -87,6 +96,7 @@ def main():
     parser.add_argument("--peer", required=True)
     parser.add_argument("--key", required=True)
     parser.add_argument("--key-id", type=int, default=1)
+    parser.add_argument("--auth", choices=["sha1", "simple"], default="sha1")
     parser.add_argument("--meticulous", action="store_true")
     parser.add_argument("--seconds", type=float, default=20.0)
     parser.add_argument("--interval", type=float, default=0.3)
@@ -105,7 +115,12 @@ def main():
     args = parser.parse_args()
 
     key = args.key.encode()
-    auth_type = AUTH_METICULOUS_KEYED_SHA1 if args.meticulous else AUTH_KEYED_SHA1
+    if args.auth == "simple":
+        auth_type = AUTH_SIMPLE_PASSWORD
+    elif args.meticulous:
+        auth_type = AUTH_METICULOUS_KEYED_SHA1
+    else:
+        auth_type = AUTH_KEYED_SHA1
     my_disc = 0x11223344
     your_disc = 0
     state = STATE_DOWN

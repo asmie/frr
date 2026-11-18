@@ -7,7 +7,8 @@
 
 """
 test_bfd_auth_replay_topo1.py: sequence number validation for keyed SHA1
-authentication (RFC 5880 Section 6.7.4).
+authentication (RFC 5880 Section 6.7.4), and that a packet failing
+authentication leaves the session as it was.
 
         +---------+                        +---------+
         |         | eth-rt2        eth-rt1 |         |
@@ -41,6 +42,7 @@ from lib.topolog import logger
 pytestmark = [pytest.mark.bfdd]
 
 KEY = "bfdauthkey123"
+WRONG_KEY = "notauthkey123"
 RT1_ADDR = "10.0.1.1"
 RT2_ADDR = "10.0.1.2"
 # rt2 is the namespace the scripted peer speaks from.
@@ -48,6 +50,10 @@ RT2_IFACE = "eth-rt1"
 
 SEQ_ERROR = "rx-pkt-authentication-keyed-sha1-sequence-error"
 SEQ_ERROR_METICULOUS = "rx-pkt-authentication-keyed-sha1-sequence-meticulous-error"
+AUTH_FAILURE = "rx-pkt-authentication-failure"
+
+# My Discriminator of the scripted peer.
+PEER_DISC = 0x11223344
 
 
 def setup_module(mod):
@@ -80,10 +86,14 @@ def counter(name):
     return counters().get(name, 0)
 
 
-def peer_state():
+def peer_info():
     rt1 = get_topogen().gears["rt1"]
     output = json.loads(rt1.vtysh_cmd("show bfd peers json"))
-    return output[0].get("status") if output else None
+    return output[0] if output else {}
+
+
+def peer_state():
+    return peer_info().get("status")
 
 
 def address_in_kernel(router, ifname, address):
@@ -128,6 +138,8 @@ def run_peer(
     seconds=20,
     seq_start=None,
     hold_until_up=False,
+    key=KEY,
+    auth="sha1",
 ):
     """Speak BFD from rt2 for `seconds`, misbehaving as asked once up."""
     wait_for_peering_address()
@@ -140,7 +152,9 @@ def run_peer(
         "--peer",
         RT1_ADDR,
         "--key",
-        KEY,
+        key,
+        "--auth",
+        auth,
         "--after-up",
         after_up,
         "--by",
@@ -185,6 +199,19 @@ def skip_unless_ready():
         pytest.skip(tgen.errors)
     if not tgen.gears["rt1"].has_crypto_openssl():
         pytest.skip("crypto-openssl disabled, skipping keyed SHA1 test")
+
+    # rt1 starts with a cleartext key so that its configuration loads on
+    # any build.
+    tgen.gears["rt1"].vtysh_cmd(
+        """
+        configure terminal
+        key chain kc1
+        key 1
+        cryptographic-algorithm hmac-sha-1
+        exit
+        exit
+        """
+    )
 
 
 def test_bfd_auth_session_comes_up():
@@ -337,6 +364,65 @@ def test_bfd_auth_meticulous_refuses_a_repeat():
     expect_state("up")
     expect_counter_above(SEQ_ERROR_METICULOUS, before)
     expect_state("down", count=60)
+    peer.terminate()
+    peer.wait()
+
+
+def test_bfd_auth_rejected_packet_teaches_nothing():
+    """A packet that fails authentication must not change the session.
+
+    rt1 is made passive, so nothing it does on its own resets the remote
+    discriminator while it waits. Packets signed with the wrong key must
+    then leave it at zero; once the right key is used it is learned and
+    the session comes up. Simple password, so that this also runs without
+    crypto-openssl.
+    """
+    tgen = get_topogen()
+    if tgen.routers_have_failure():
+        pytest.skip(tgen.errors)
+
+    expect_state("down", count=60)
+    tgen.gears["rt1"].vtysh_cmd(
+        """
+        configure terminal
+        key chain kc1
+        key 1
+        cryptographic-algorithm cleartext
+        exit
+        exit
+        bfd
+        peer {} local-address {} interface eth-rt2
+        no authentication algorithm meticulous
+        passive-mode
+        exit
+        exit
+        """.format(
+            RT2_ADDR, RT1_ADDR
+        )
+    )
+
+    test_func = lambda: peer_info().get("remote-id")
+    _, result = topotest.run_and_expect(test_func, 0, count=20, wait=0.5)
+    assert result == 0, "remote discriminator did not clear, it is {}".format(result)
+
+    failures = counter(AUTH_FAILURE)
+    received = counter("control-packet-input")
+    peer = run_peer(key=WRONG_KEY, auth="simple", seconds=30)
+    expect_counter_above(AUTH_FAILURE, failures + 5)
+    peer.terminate()
+    peer.wait()
+
+    info = peer_info()
+    remote_id = info.get("remote-id")
+    assert remote_id == 0, "forged packet set remote-id to {:#x}".format(remote_id)
+    status = info.get("status")
+    assert status == "down", "forged packet moved the session to {}".format(status)
+    # Dropped for authentication, but still counted as received.
+    assert counter("control-packet-input") > received + 5
+
+    peer = run_peer(auth="simple", seconds=25)
+    expect_state("up")
+    assert peer_info().get("remote-id") == PEER_DISC
     peer.terminate()
     peer.wait()
 
