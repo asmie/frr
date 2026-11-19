@@ -756,7 +756,6 @@ int bfdd_bfd_profile_authentication_key_chain_modify(struct nb_cb_modify_args *a
 
 	strlcpy(bp->auth_config.key_chain_name, key_chain_name,
 		sizeof(bp->auth_config.key_chain_name));
-	bp->kc = keychain_lookup(bp->auth_config.key_chain_name);
 	bfd_profile_update(bp);
 
 	return NB_OK;
@@ -774,8 +773,6 @@ int bfdd_bfd_profile_authentication_key_chain_destroy(struct nb_cb_destroy_args 
 		return NB_ERR_NOT_FOUND;
 
 	memset(bp->auth_config.key_chain_name, 0, sizeof(bp->auth_config.key_chain_name));
-	bp->kc = NULL;
-
 	bfd_profile_update(bp);
 
 	return NB_OK;

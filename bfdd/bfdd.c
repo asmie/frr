@@ -193,70 +193,18 @@ distributed_bfd_init(const char *arg)
 	bfd_dplane_init((struct sockaddr *)&address.address, address.address_size, is_client);
 }
 
-static void __bfd_process_keychain_updated(const char *keychain_name, bool is_mhop,
-					   bool remove_event)
-{
-	struct bfd_session *bs;
-	const struct bfd_session *iter = NULL;
-	struct keychain *kc;
-
-	kc = keychain_lookup(keychain_name);
-
-	while ((iter = bfd_session_next(iter, is_mhop, BFD_MODE_TYPE_BFD)) != NULL) {
-		bs = (struct bfd_session *)iter;
-
-		if (!bfd_session_auth_config_takes_precedence_over_profile(bs))
-			/* Peer-specific config takes precedence */
-			continue;
-
-		if (strcmp(keychain_name, bs->peer_profile.auth_config.key_chain_name) != 0)
-			/* peer profile keychain name does not match */
-			continue;
-
-		if (kc && remove_event == false)
-			bs->kc = kc;
-		else
-			bs->kc = NULL;
-
-		zlog_info("BFD: session [%s], keychain %s %s", bs_to_string(bs), keychain_name,
-			  remove_event ? "removed" : "updated");
-
-		bfd_session_apply(bs);
-	}
-}
-
-static int _bfd_process_keychain_updated(const char *keychain_name, bool remove_event)
-{
-	struct bfd_profile *bp;
-
-	if (!keychain_name)
-		return 0;
-
-	TAILQ_FOREACH (bp, &bplist, entry) {
-		if (bp->auth_config.key_chain_name[0] == '\0' ||
-		    strcmp(keychain_name, bp->auth_config.key_chain_name) != 0)
-			/* profile keychain name does not match */
-			continue;
-
-		zlog_info("BFD: profile %s, keychain %s %s", bp->name, keychain_name,
-			  remove_event ? "removed" : "updated");
-
-		bfd_profile_update(bp);
-	}
-
-	__bfd_process_keychain_updated(keychain_name, false, remove_event);
-	__bfd_process_keychain_updated(keychain_name, true, remove_event);
-	return 0;
-}
-
 static int bfd_process_keychain_remove(const char *keychain_name)
 {
-	return _bfd_process_keychain_updated(keychain_name, true);
+	if (keychain_name)
+		bfd_keychain_changed(keychain_name, true);
+	return 0;
 }
 
 static int bfd_process_keychain_update(const char *keychain_name)
 {
-	return _bfd_process_keychain_updated(keychain_name, false);
+	if (keychain_name)
+		bfd_keychain_changed(keychain_name, false);
+	return 0;
 }
 
 static void bg_init(void)

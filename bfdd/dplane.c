@@ -772,7 +772,7 @@ static uint64_t bfd_dplane_session_needs(const struct bfd_session *bs)
 {
 	uint64_t needs = 0;
 
-	if (bs->kc)
+	if (bs->auth_required)
 		needs |= BFDDP_CAP_SESSION_AUTH;
 
 	return needs;
@@ -1031,7 +1031,7 @@ static void _bfd_dplane_session_fill(const struct bfd_session *bs,
 		msg->data.session.flags |= SESSION_DEMAND;
 	if (bs->flags & BFD_SESS_FLAG_PASSIVE)
 		msg->data.session.flags |= SESSION_PASSIVE;
-	if (bs->kc)
+	if (bs->auth_required)
 		msg->data.session.flags |= SESSION_AUTH;
 	if (bs->flags & BFD_SESS_FLAG_SHUTDOWN)
 		msg->data.session.flags |= SESSION_SHUTDOWN;
@@ -1571,9 +1571,10 @@ static int64_t bfd_dplane_key_end(const struct key_range *range)
  * at every rollover would put the BFD daemon back in a path that
  * offloading exists to keep it out of.
  *
- * Only sent for a session that has a key chain. `SESSION_AUTH` in the
+ * Only sent for a session configured to authenticate. `SESSION_AUTH` in the
  * session message is what says whether the session authenticates at all,
- * so a data plane drops the keys it holds when that flag goes away.
+ * so a data plane drops the keys it holds when that flag goes away. A chain
+ * that does not exist sends no keys, so nothing is accepted.
  */
 static int bfd_dplane_send_session_auth(const struct bfd_session *bs)
 {
@@ -1605,7 +1606,7 @@ static int bfd_dplane_send_session_auth(const struct bfd_session *bs)
 	 *
 	 * Only the first pass warns, so each key is complained about once.
 	 */
-	for (pass = 0; pass < 2; pass++) {
+	for (pass = 0; bs->kc && pass < 2; pass++) {
 		enum bfd_dplane_key_class want = pass == 0 ? BFD_DPLANE_KEY_LIVE
 							   : BFD_DPLANE_KEY_FUTURE;
 
@@ -1683,7 +1684,7 @@ static int _bfd_dplane_update_session(struct bfd_session *bs, bool detach)
 	if (rv != 0)
 		return rv;
 
-	if (bs->kc == NULL)
+	if (!bs->auth_required)
 		return rv;
 
 	rv = bfd_dplane_send_session_auth(bs);

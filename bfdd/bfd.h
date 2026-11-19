@@ -353,7 +353,6 @@ struct bfd_profile {
 	/** Minimum required echo receive interval (in microseconds). */
 	uint32_t min_echo_rx;
 
-	struct keychain *kc; /* Currently active keychain for this session */
 	struct {
 		/* Keychain name for authentication */
 		char key_chain_name[MAXKEYCHAINNAMELEN + 1];
@@ -455,6 +454,8 @@ struct bfd_session {
 	struct in6_addr out_sip6;
 	struct in6_addr seg_list[SRV6_MAX_SEGS];
 	struct keychain *kc; /* Currently active keychain for this session */
+	/* A key chain is configured, whether or not kc could be resolved. */
+	bool auth_required;
 	uint32_t auth_seq_num;
 	uint32_t auth_last_rx_seq_num;
 	/*
@@ -767,7 +768,7 @@ void bfd_set_log_session_changes(struct bfd_session *bs, bool log_session);
  * \param bs the BFD session.
  */
 void bfd_session_apply(struct bfd_session *bs);
-bool bfd_session_auth_config_takes_precedence_over_profile(struct bfd_session *bs);
+const char *bfd_session_auth_key_chain_name(const struct bfd_session *bs);
 
 /* BFD hash data structures interface */
 void bfd_initialize(void);
@@ -862,6 +863,7 @@ void bfd_profile_remove(struct bfd_session *bs);
  * \param[in] bp the BFD profile that got updated.
  */
 void bfd_profile_update(struct bfd_profile *bp);
+void bfd_keychain_changed(const char *name, bool removed);
 
 /*
  * bfdd_vty.c

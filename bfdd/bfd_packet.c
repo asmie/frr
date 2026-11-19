@@ -560,12 +560,13 @@ void ptm_bfd_snd(struct bfd_session *bfd, int fbit)
 		/*
 		 * RFC 5880 Section 6.7 has no unauthenticated mode for a
 		 * session configured to authenticate. Reaching here with a
-		 * keychain attached means nothing could be built for it: no
-		 * usable key, or a type this build cannot produce. Sending in
-		 * the clear would leave the link unprotected while `show bfd
-		 * peer` still reports authentication, so send nothing.
+		 * keychain configured means nothing could be built for it: the
+		 * chain does not exist, holds no usable key, or needs a type
+		 * this build cannot produce. Sending in the clear would leave
+		 * the link unprotected while `show bfd peer` still reports
+		 * authentication, so send nothing.
 		 */
-		if (bfd->kc)
+		if (bfd->auth_required)
 			return;
 
 		cp.len = packet_len;
@@ -995,12 +996,13 @@ static bool bfd_check_auth(struct bfd_session *bfd, const struct bfd_pkt *cp)
 									bfd->auth_meticulous);
 	if (!CHECK_FLAG(cp->flags, BFD_ABIT)) {
 		/*
-		 * Tested on the keychain rather than on the key found in it.
-		 * A keychain holding nothing usable must still refuse an
-		 * unauthenticated peer, or a key the local system cannot load
-		 * silently disables authentication on the link.
+		 * Tested on the configuration rather than on the keychain or
+		 * the key found in it. A keychain that is missing or holds
+		 * nothing usable must still refuse an unauthenticated peer, or
+		 * a key the local system cannot load silently disables
+		 * authentication on the link.
 		 */
-		if (bfd->kc) {
+		if (bfd->auth_required) {
 			cp_debug(CHECK_FLAG(bfd->flags, BFD_SESS_FLAG_MH), &peer_sa, &local_sa,
 				 bfd->ifp ? bfd->ifp->ifindex : 0, bfd->vrf ? bfd->vrf->vrf_id : 0,
 				 "Auth: enabled on session, but peer sent no auth");

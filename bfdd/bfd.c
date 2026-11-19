@@ -165,20 +165,24 @@ void bfd_profile_apply(const char *profname, struct bfd_session *bs)
 	bfd_session_apply(bs);
 }
 
-bool bfd_session_auth_config_takes_precedence_over_profile(struct bfd_session *bs)
+/*
+ * The key chain a session authenticates with: its own if it names one,
+ * otherwise its profile's. This goes by name only, so a peer whose chain
+ * does not exist never ends up with the profile's instead.
+ */
+const char *bfd_session_auth_key_chain_name(const struct bfd_session *bs)
 {
-	struct keychain *kc = NULL; /* Currently active keychain for this session */
-
 	if (bs->peer_profile.auth_config.key_chain_name[0] != '\0')
-		kc = keychain_lookup(bs->peer_profile.auth_config.key_chain_name);
-	if (kc)
-		return true;
-	return false;
+		return bs->peer_profile.auth_config.key_chain_name;
+	if (bs->profile && bs->profile->auth_config.key_chain_name[0] != '\0')
+		return bs->profile->auth_config.key_chain_name;
+	return NULL;
 }
 
 void bfd_session_apply(struct bfd_session *bs)
 {
 	struct bfd_profile *bp;
+	const char *kc_name;
 	uint32_t min_tx = bs->timers.desired_min_tx;
 	uint32_t min_rx = bs->timers.required_min_rx;
 
@@ -256,24 +260,26 @@ void bfd_session_apply(struct bfd_session *bs)
 	else
 		bfd_set_log_session_changes(bs, bs->peer_profile.log_session_changes);
 
-	/* Determine effective authentication settings */
-	bs->kc = NULL;
-
-	/* Peer-specific config takes precedence */
-	if (bfd_session_auth_config_takes_precedence_over_profile(bs))
-		bs->kc = keychain_lookup(bs->peer_profile.auth_config.key_chain_name);
-	else if (bs->profile && bs->profile->auth_config.key_chain_name[0] != '\0')
-		bs->kc = keychain_lookup(bs->profile->auth_config.key_chain_name);
+	/*
+	 * Naming a key chain is what asks for authentication, whether or
+	 * not the chain exists yet.
+	 */
+	kc_name = bfd_session_auth_key_chain_name(bs);
+	bs->auth_required = kc_name != NULL;
+	bs->kc = kc_name ? keychain_lookup(kc_name) : NULL;
 
 	bs->auth_meticulous = bs->peer_profile.auth_config.meticulous ||
 			      (bs->profile && bs->profile->auth_config.meticulous);
 
 	/*
-	 * Warn here rather than per packet. A keychain that holds nothing
-	 * this session can use now keeps the session down instead of
-	 * quietly running it unauthenticated, so say which keychain it was.
+	 * Warn here rather than per packet. A keychain that is missing or
+	 * holds nothing this session can use keeps the session down instead
+	 * of quietly running it unauthenticated, so say which keychain it was.
 	 */
-	if (bs->kc && !bfd_keychain_key_find_active(bs->kc, bs->auth_meticulous))
+	if (bs->auth_required && !bs->kc)
+		zlog_warn("BFD: session [%s] uses keychain %s, which does not exist; the session will not authenticate",
+			  bs_to_string(bs), kc_name);
+	else if (bs->kc && !bfd_keychain_key_find_active(bs->kc, bs->auth_meticulous))
 		zlog_warn("BFD: session [%s] has keychain %s but no key it can use; the session will not authenticate",
 			  bs_to_string(bs), bs->kc->name);
 
@@ -2695,6 +2701,43 @@ static void _bfd_profile_update(struct hash_bucket *hb, void *arg)
 void bfd_profile_update(struct bfd_profile *bp)
 {
 	hash_iterate(bfd_key_hash, _bfd_profile_update, bp);
+}
+
+struct bfd_keychain_change {
+	const char *name;
+	bool removed;
+};
+
+static void _bfd_keychain_changed(struct hash_bucket *hb, void *arg)
+{
+	struct bfd_keychain_change *kcc = arg;
+	struct bfd_session *bs = hb->data;
+	const char *name = bfd_session_auth_key_chain_name(bs);
+
+	if (name == NULL || strcmp(name, kcc->name) != 0)
+		return;
+
+	/* Shutting down: stop using the chain, there is nothing to redo. */
+	if (bglobal.bg_shutdown) {
+		bs->kc = NULL;
+		return;
+	}
+
+	zlog_info("BFD: session [%s], keychain %s %s", bs_to_string(bs), kcc->name,
+		  kcc->removed ? "removed" : "updated");
+	bfd_session_apply(bs);
+}
+
+/*
+ * Sessions are matched by the name they are configured with. A removed
+ * chain has already been unlinked and can no longer be looked up, yet the
+ * sessions using it still point at it until they are applied again.
+ */
+void bfd_keychain_changed(const char *name, bool removed)
+{
+	struct bfd_keychain_change kcc = { .name = name, .removed = removed };
+
+	hash_iterate(bfd_key_hash, _bfd_keychain_changed, &kcc);
 }
 
 struct bfd_profile_detach_info {
