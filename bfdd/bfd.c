@@ -30,7 +30,7 @@ DEFINE_MTYPE_STATIC(BFDD, BFD_PERM_VRF, "BFD perm vrf data");
 /*
  * Prototypes
  */
-static uint32_t ptm_bfd_gen_ID(void);
+static uint32_t ptm_bfd_gen_ID(bool *strong);
 static void ptm_bfd_echo_xmt_TO(struct bfd_session *bfd);
 static struct bfd_session *bfd_find_disc(struct sockaddr_any *sa, uint32_t ldisc);
 static const char *get_diag_str(int diag);
@@ -563,15 +563,21 @@ void bfd_session_disable(struct bfd_session *bs)
 	bs->ifp = NULL;
 }
 
-static uint32_t ptm_bfd_gen_ID(void)
+static uint32_t ptm_bfd_gen_ID(bool *strong)
 {
 	uint32_t session_id;
 
 	/*
 	 * RFC 5880, Section 6.8.1. recommends that we should generate
-	 * random session identification numbers.
+	 * random session identification numbers. random() is seeded with
+	 * the time the daemon started, so it only stands in when the
+	 * system has nothing better to give.
 	 */
 	do {
+		*strong = frr_csprng_bytes(&session_id, sizeof(session_id));
+		if (*strong)
+			continue;
+
 		session_id = CHECK_FLAG((frr_weak_random() << 16), 0xFFFF0000) |
 			     CHECK_FLAG(frr_weak_random(), 0x0000FFFF);
 	} while (session_id == 0 || bfd_id_lookup(session_id) != NULL);
@@ -1377,7 +1383,7 @@ struct bfd_session *bs_registrate(struct bfd_session *bfd)
 {
 	/* Register session into data structures. */
 	bfd_key_insert(bfd);
-	bfd->discrs.my_discr = ptm_bfd_gen_ID();
+	bfd->discrs.my_discr = ptm_bfd_gen_ID(&bfd->discr_strong);
 	bfd_id_insert(bfd);
 
 	/* Try to enable session and schedule for packet receive/send. */

@@ -397,6 +397,8 @@ struct bfd_session {
 	/* protocol state per RFC 5880*/
 	uint8_t ses_state;
 	struct bfd_discrs discrs;
+	/* The local one came from the CSPRNG and not from random(). */
+	bool discr_strong;
 	uint8_t local_diag;
 	uint8_t detect_mult;
 	uint8_t remote_detect_mult;
