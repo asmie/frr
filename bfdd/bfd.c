@@ -1823,8 +1823,16 @@ void bs_final_handler(struct bfd_session *bs)
 	if (bglobal.debug_peer_event)
 		zlog_debug("  APPLYING new xmt_TO=%" PRIu64, bs->xmt_TO);
 
-	/* Apply new transmission timer immediately. */
-	ptm_bfd_start_xmt_timer(bs, false);
+	/*
+	 * Apply new transmission timer immediately. One that has not changed
+	 * is left to run: started over, it would put the next packet a whole
+	 * interval after this one, and that much later than the peer expects
+	 * it, which a Detect Mult of 1 does not allow for. It is started if
+	 * it is not running at all, as with a passive session that an Init
+	 * has just brought up.
+	 */
+	if (bs->xmt_TO != old_xmt_TO || bs->xmttimer_ev == NULL)
+		ptm_bfd_start_xmt_timer(bs, false);
 }
 
 void bs_set_slow_timers(struct bfd_session *bs)
