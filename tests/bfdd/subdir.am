@@ -1,0 +1,13 @@
+if !BFDD
+PYTEST_IGNORE += --ignore=$(abs_srcdir)/tests/bfdd/
+endif
+BFDD_TEST_LDADD = bfdd/libbfd.a $(ALL_TESTS_LDADD)
+
+if BFDD
+check_PROGRAMS += tests/bfdd/test_bfd_auth
+endif
+tests_bfdd_test_bfd_auth_CFLAGS = $(TESTS_CFLAGS)
+tests_bfdd_test_bfd_auth_CPPFLAGS = $(TESTS_CPPFLAGS)
+tests_bfdd_test_bfd_auth_LDADD = $(BFDD_TEST_LDADD)
+tests_bfdd_test_bfd_auth_SOURCES = tests/bfdd/test_bfd_auth.c
+EXTRA_DIST += tests/bfdd/test_bfd_auth.py
