@@ -276,11 +276,13 @@ BFD peers and profiles share the same BFD session configuration commands.
    defaults to no algorithm, so configuring ``key-string`` on its own
    leaves nothing the session can use.
 
-   A session whose key-chain holds no usable key stays down. It is not
-   brought up unauthenticated, since that would leave the link
-   unprotected while the configuration says otherwise. ``show bfd peer``
-   distinguishes the two: authentication is reported as enabled once a
-   key is in effect, and as configured when only the key-chain is.
+   A session whose key-chain does not exist, or holds no usable key,
+   stays down. It is not brought up unauthenticated, since that would
+   leave the link unprotected while the configuration says otherwise.
+   ``show bfd peer`` reports authentication as enabled once a key is in
+   effect, and as configured when only the key-chain is. S-BFD is not
+   covered: an initiator sends its packets unauthenticated, and echo
+   packets carry no authentication.
 
 .. clicmd:: authentication algorithm meticulous
 
