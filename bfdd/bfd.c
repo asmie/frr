@@ -277,10 +277,10 @@ void bfd_session_apply(struct bfd_session *bs)
 	 * of quietly running it unauthenticated, so say which keychain it was.
 	 */
 	if (bs->auth_required && !bs->kc)
-		zlog_warn("BFD: session [%s] uses keychain %s, which does not exist; the session will not authenticate",
+		zlog_warn("BFD: session [%s] uses keychain %s, which does not exist; the session stays down",
 			  bs_to_string(bs), kc_name);
 	else if (bs->kc && !bfd_keychain_key_find_active(bs->kc, bs->auth_meticulous))
-		zlog_warn("BFD: session [%s] has keychain %s but no key it can use; the session will not authenticate",
+		zlog_warn("BFD: session [%s] has keychain %s but no key it can use; the session stays down",
 			  bs_to_string(bs), bs->kc->name);
 
 	/* If session interval changed negotiate new timers. */

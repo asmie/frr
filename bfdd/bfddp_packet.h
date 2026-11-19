@@ -411,8 +411,10 @@ struct bfddp_auth_key {
  *
  * Sent whenever the session's keys change, which is a configuration event
  * rather than a rollover: a rollover is the data plane noticing that a
- * lifetime has passed. A message carrying no keys means the session has
- * none left and must not be authenticated.
+ * lifetime has passed. A message carrying no keys, for a session that has
+ * `SESSION_AUTH` set, means none is usable: nothing may be sent or
+ * accepted, the session must not fall back to running unauthenticated.
+ * Whether a session authenticates at all is only ever said by that flag.
  */
 struct bfddp_session_auth {
 	/** Session local discriminator. */
