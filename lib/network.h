@@ -106,6 +106,19 @@ static inline long frr_weak_random(void)
 	return random();
 }
 
+/**
+ * Fills a buffer from the system's cryptographically secure generator.
+ *
+ * It never blocks and there is nothing weaker behind it: while the system
+ * has not gathered its entropy yet, or where it has no such generator,
+ * the call fails and the buffer is not to be used.
+ *
+ * \param buf the buffer to fill.
+ * \param len the number of bytes wanted.
+ * \returns `true` if all of them were written.
+ */
+extern bool frr_csprng_bytes(void *buf, size_t len);
+
 /** Parsed network address information. */
 struct network_address {
 	/** Address storage. */

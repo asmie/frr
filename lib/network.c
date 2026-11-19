@@ -7,6 +7,9 @@
 #include <zebra.h>
 
 #include <sys/un.h>
+#ifdef HAVE_GETRANDOM
+#include <sys/random.h>
+#endif
 
 #include <fcntl.h>
 #include "log.h"
@@ -131,6 +134,32 @@ uint32_t frr_sequence32_next(void)
 {
 	/* coverity[Y2K38_SAFETY] */
 	return (uint32_t)frr_sequence_next();
+}
+
+bool frr_csprng_bytes(void *buf, size_t len)
+{
+#if defined(HAVE_GETRANDOM)
+	uint8_t *p = buf;
+	ssize_t n;
+
+	/* A call may be cut short by a signal or return less than asked. */
+	while (len > 0) {
+		n = getrandom(p, len, GRND_NONBLOCK);
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			return false;
+		}
+		p += n;
+		len -= n;
+	}
+	return true;
+#elif defined(HAVE_ARC4RANDOM_BUF)
+	arc4random_buf(buf, len);
+	return true;
+#else
+	return false;
+#endif
 }
 
 /**
