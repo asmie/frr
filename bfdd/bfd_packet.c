@@ -42,6 +42,7 @@
 
 #include "lib/keychain.h"
 #include "bfd.h"
+#include "bfd_auth.h"
 #include "bfd_trace.h"
 #define BUF_SIZ		   1024
 #define SOCK_OPT_PRIO_HIGH 6
@@ -1132,7 +1133,7 @@ static bool bfd_check_auth(struct bfd_session *bfd, const struct bfd_pkt *cp)
 		if (bfd->auth_seq_known) {
 			bool meticulous = received_auth_type ==
 					  BFD_AUTH_TYPE_METICULOUS_KEYED_SHA1;
-			uint32_t lowest = meticulous ? 1 : 0;
+
 			/*
 			 * RFC 5880 names the local state variable
 			 * bfd.DetectMult and the header field Detect Mult;
@@ -1141,25 +1142,15 @@ static bool bfd_check_auth(struct bfd_session *bfd, const struct bfd_pkt *cp)
 			 * bfd_recv_cb() has already discarded the packet if
 			 * that field is zero.
 			 */
-			uint32_t highest = 3 * cp->detect_mult;
-			uint32_t distance;
-
-			/*
-			 * The window is bfd.RcvAuthSeq to bfd.RcvAuthSeq +
-			 * (3 * Detect Mult) inclusive, one past that for the
-			 * meticulous variants. Unsigned subtraction gives the
-			 * circular number space the RFC asks for: a sequence
-			 * number behind the stored one wraps to a distance
-			 * larger than the window and is rejected.
-			 */
-			distance = received_seq_num - bfd->auth_last_rx_seq_num;
-			if (distance < lowest || distance > highest) {
+			if (!bfd_auth_seq_in_window(bfd->auth_last_rx_seq_num, received_seq_num,
+						    meticulous, cp->detect_mult)) {
 				cp_debug(CHECK_FLAG(bfd->flags, BFD_SESS_FLAG_MH), &peer_sa,
 					 &local_sa, bfd->ifp ? bfd->ifp->ifindex : 0,
 					 bfd->vrf ? bfd->vrf->vrf_id : 0,
 					 "Auth: sequence number %u outside window %u..%u",
-					 received_seq_num, bfd->auth_last_rx_seq_num + lowest,
-					 bfd->auth_last_rx_seq_num + highest);
+					 received_seq_num,
+					 bfd->auth_last_rx_seq_num + (meticulous ? 1 : 0),
+					 bfd->auth_last_rx_seq_num + 3 * cp->detect_mult);
 				if (meticulous)
 					bfd->stats.rx_pkt_authentication_keyed_sha1_sequence_meticulous_error++;
 				else
