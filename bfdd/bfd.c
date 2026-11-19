@@ -104,6 +104,7 @@ static void bfd_profile_set_default(struct bfd_profile *bp)
 	/* Keychain authentication parameters */
 	memset(bp->auth_config.key_chain_name, 0, sizeof(bp->auth_config.key_chain_name));
 	bp->auth_config.meticulous = false;
+	bp->auth_config.optimized = false;
 }
 
 struct bfd_profile *bfd_profile_new(const char *name)
@@ -262,24 +263,34 @@ void bfd_session_apply(struct bfd_session *bs)
 
 	/*
 	 * Naming a key chain is what asks for authentication, whether or
-	 * not the chain exists yet.
+	 * not the chain exists yet, and so does asking for the optimized
+	 * kind.
 	 */
 	kc_name = bfd_session_auth_key_chain_name(bs);
-	bs->auth_required = kc_name != NULL;
+	bs->auth_optimized = bs->peer_profile.auth_config.optimized ||
+			     (bs->profile && bs->profile->auth_config.optimized);
+	bs->auth_required = kc_name != NULL || bs->auth_optimized;
 	bs->kc = kc_name ? keychain_lookup(kc_name) : NULL;
 
 	bs->auth_meticulous = bs->peer_profile.auth_config.meticulous ||
 			      (bs->profile && bs->profile->auth_config.meticulous);
+	bs->auth_opt_hold = bfd_auth_opt_hold_reason(bs);
 
 	/*
 	 * Warn here rather than per packet. A keychain that is missing or
 	 * holds nothing this session can use keeps the session down instead
 	 * of quietly running it unauthenticated, so say which keychain it was.
 	 */
-	if (bs->auth_required && !bs->kc)
+	if (bs->auth_opt_hold != BFD_AUTH_OPT_HOLD_NONE)
+		zlog_warn("BFD: session [%s] cannot use optimized authentication, %s; the session stays down",
+			  bs_to_string(bs), bfd_auth_opt_hold_str(bs->auth_opt_hold));
+	else if (bs->auth_required && !kc_name)
+		zlog_warn("BFD: session [%s] is to use optimized authentication but names no keychain; the session stays down",
+			  bs_to_string(bs));
+	else if (bs->auth_required && !bs->kc)
 		zlog_warn("BFD: session [%s] uses keychain %s, which does not exist; the session stays down",
 			  bs_to_string(bs), kc_name);
-	else if (bs->kc && !bfd_keychain_key_find_active(bs->kc, bs->auth_meticulous))
+	else if (bs->kc && !bfd_session_auth_send_key(bs))
 		zlog_warn("BFD: session [%s] has keychain %s but no key it can use; the session stays down",
 			  bs_to_string(bs), bs->kc->name);
 

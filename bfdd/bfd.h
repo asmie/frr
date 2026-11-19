@@ -122,6 +122,15 @@ enum bfd_auth_type {
 	BFD_AUTH_TYPE_METICULOUS_KEYED_SHA1 = 5,
 };
 
+/* What keeps a session from running with optimized authentication. */
+enum bfd_auth_opt_hold {
+	BFD_AUTH_OPT_HOLD_NONE = 0,
+	BFD_AUTH_OPT_HOLD_SBFD,
+	BFD_AUTH_OPT_HOLD_DPLANE,
+	BFD_AUTH_OPT_HOLD_DEMAND,
+	BFD_AUTH_OPT_HOLD_DETECT_MULT,
+};
+
 struct bfd_timers {
 	uint32_t desired_min_tx;
 	uint32_t required_min_rx;
@@ -357,6 +366,8 @@ struct bfd_profile {
 		/* Keychain name for authentication */
 		char key_chain_name[MAXKEYCHAINNAMELEN + 1];
 		bool meticulous;
+		/* RFC 9986 optimized authentication. */
+		bool optimized;
 	} auth_config;
 
 	/** Profile list entry. */
@@ -465,6 +476,12 @@ struct bfd_session {
 	bool auth_seq_known;
 	struct timeval auth_last_rx_time;
 	bool auth_meticulous;
+	/*
+	 * RFC 9986 optimized authentication is asked for. A session that
+	 * cannot run with it stays down rather than use anything else.
+	 */
+	bool auth_optimized;
+	enum bfd_auth_opt_hold auth_opt_hold;
 };
 
 struct bfd_diag_str_list {
@@ -721,6 +738,11 @@ extern enum bfd_auth_type map_keychain_algo_to_bfd_auth_type(enum keychain_hash_
 							     bool meticulous);
 extern const char *bfd_auth_type_get_description(enum bfd_auth_type auth_type);
 extern struct key *bfd_keychain_key_find_active(const struct keychain *keychain, bool meticulous);
+extern struct key *bfd_auth_opt_key_find_send(const struct keychain *kc);
+/* The key a session would send with now, whichever kind it uses. */
+extern struct key *bfd_session_auth_send_key(const struct bfd_session *bs);
+extern enum bfd_auth_opt_hold bfd_auth_opt_hold_reason(const struct bfd_session *bs);
+extern const char *bfd_auth_opt_hold_str(enum bfd_auth_opt_hold hold);
 void bs_sbfd_echo_timer_handler(struct bfd_session *bs);
 void bfd_rtt_init(struct bfd_session *bfd);
 int bfd_session_update(struct bfd_session *bs, struct bfd_peer_cfg *bpc);

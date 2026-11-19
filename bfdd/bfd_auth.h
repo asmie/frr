@@ -65,6 +65,11 @@ static inline bool bfd_auth_seq_in_window(uint32_t last, uint32_t seq, bool meti
 #define BFD_AUTH_ISAAC_LEN	 16 /* type, length, key ID, mode, sequence, Seed, Auth Key */
 #define BFD_AUTH_OPT_KEY_MIN_LEN 8  /* RFC 9986 Section 8 */
 #define BFD_AUTH_OPT_PKT_MAX	 (24 + BFD_AUTH_MD5_LEN)
+/*
+ * The largest Detect Mult we run a session with: the window of three
+ * times as many sequence numbers then fits the two pages kept at hand.
+ */
+#define BFD_AUTH_OPT_DETECT_MULT_MAX 85
 
 enum bfd_auth_opt_result {
 	BFD_AUTH_OPT_OK = 0,

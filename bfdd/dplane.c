@@ -782,6 +782,10 @@ static bool bfd_dplane_can_run(const struct bfd_dplane_ctx *bdc, const struct bf
 {
 	uint64_t missing = bfd_dplane_session_needs(bs) & ~bdc->caps;
 
+	/* There is no way to hand optimized authentication to a data plane. */
+	if (bs->auth_optimized)
+		return false;
+
 	if (!missing)
 		return true;
 

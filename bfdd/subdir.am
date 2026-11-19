@@ -12,6 +12,7 @@ endif
 bfdd_libbfd_a_SOURCES = \
 	bfdd/bfd.c \
 	bfdd/bfd_auth.c \
+	bfdd/bfd_auth_session.c \
 	bfdd/bfd_isaac.c \
 	bfdd/bfdd_nb.c \
 	bfdd/bfdd_nb_config.c \

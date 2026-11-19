@@ -494,12 +494,10 @@ void ptm_bfd_snd(struct bfd_session *bfd, int fbit)
 	cp.timers.required_min_echo = htonl(bfd->timers.required_min_echo_rx);
 
 	/* Authentication Handling */
-	if (bfd->kc) {
-		key = bfd_keychain_key_find_active(bfd->kc, bfd->auth_meticulous);
-		if (key)
-			pkt_auth_type = map_keychain_algo_to_bfd_auth_type(key->hash_algo,
-									   bfd->auth_meticulous);
-	}
+	key = bfd_session_auth_send_key(bfd);
+	if (key)
+		pkt_auth_type = map_keychain_algo_to_bfd_auth_type(key->hash_algo,
+								   bfd->auth_meticulous);
 	if (pkt_auth_type == BFD_AUTH_TYPE_SIMPLE_PASSWORD) {
 		auth_section_len = 3 + strlen(key->string);
 		packet_len = BFD_PKT_LEN + auth_section_len;
@@ -990,9 +988,8 @@ static bool bfd_check_auth(struct bfd_session *bfd, const struct bfd_pkt *cp)
 	}
 
 	/* Check current expected auth type to prevent stale cache drops */
-	if (bfd->kc)
-		active_key = bfd_keychain_key_find_active(bfd->kc, bfd->auth_meticulous);
-	if (bfd->kc && active_key)
+	active_key = bfd_session_auth_send_key(bfd);
+	if (active_key)
 		expected_auth_type = map_keychain_algo_to_bfd_auth_type(active_key->hash_algo,
 									bfd->auth_meticulous);
 	if (!CHECK_FLAG(cp->flags, BFD_ABIT)) {
