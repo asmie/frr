@@ -230,7 +230,7 @@ static enum bfd_auth_opt_result opt_rx_isaac(struct bfd_auth_opt *opt, const uin
 	uint32_t seq = get32(pkt + SEC_SEQ);
 	uint32_t seed = get32(pkt + SEC_SEED);
 	uint32_t auth_key = get32(pkt + SEC_AUTH_KEY);
-	uint32_t step, idx;
+	uint32_t step, span, idx;
 
 	/*
 	 * Nothing here is signed, so it can only stand for a signed Up
@@ -257,20 +257,23 @@ static enum bfd_auth_opt_result opt_rx_isaac(struct bfd_auth_opt *opt, const uin
 		/*
 		 * RFC 9986 Section 10.2 has the stream start at the sequence
 		 * number expected next, so that a packet arriving later sits
-		 * that much further in. That takes every packet lost for one
-		 * of the stream, and signed ones lost just before it were not:
-		 * so the number is looked for from there back to the start, and
-		 * where it turns up says where the stream began.
+		 * that much further in. That takes every packet lost since
+		 * for one of the stream, and no packet before for one, and
+		 * neither need be so: signed packets may have been lost just
+		 * before the stream started, and it may have started unseen
+		 * before signed packets that did arrive. What is certain is
+		 * that it started after the first packet of this time up. So
+		 * the number is looked for wherever on the first page that
+		 * leaves room for, and where it turns up says where the
+		 * stream began.
 		 *
 		 * The generator is seeded in place; it only counts once a number
 		 * checks out, which a made up Seed will not manage.
 		 */
-		if (step > BFD_ISAAC_PAGE)
-			return BFD_AUTH_OPT_SEQUENCE;
-
+		span = seq - opt->rx_first_seq;
 		bfd_isaac_seed(&opt->rx_isaac, seed, get32(pkt + HDR_YOUR_DISCR),
 			       (const uint8_t *)key, strlen(key));
-		for (idx = step - 1; opt->rx_isaac.rsl[idx] != auth_key; idx--)
+		for (idx = MIN(span, BFD_ISAAC_PAGE) - 1; opt->rx_isaac.rsl[idx] != auth_key; idx--)
 			if (idx == 0)
 				return BFD_AUTH_OPT_AUTH_KEY;
 
@@ -364,6 +367,10 @@ void bfd_auth_opt_rx_commit(struct bfd_auth_opt *opt, const uint8_t *pkt,
 	 * nothing, and there is no telling where in the stream it is.
 	 */
 	seq = get32(pkt + SEC_SEQ);
+	if (!opt->rx_first_known) {
+		opt->rx_first_seq = seq;
+		opt->rx_first_known = true;
+	}
 	if (opt->rx_live) {
 		step = seq - opt->rx_last_seq;
 		if (step == 0 || step > OPT_MAX_STEP) {

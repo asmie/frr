@@ -144,8 +144,10 @@ struct bfd_auth_opt {
 	bool rx_live;
 	/* The stream cannot be followed any more; only signed packets count. */
 	bool rx_lost;
-	/* Sequence number of the last packet accepted since Up. */
+	/* Sequence number of the last packet accepted since Up, and of the first. */
 	uint32_t rx_last_seq;
+	uint32_t rx_first_seq;
+	bool rx_first_known;
 	/* Header of the last signed Up packet, which ISAAC ones must repeat. */
 	uint8_t rx_ref[24];
 	bool rx_ref_valid;

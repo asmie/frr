@@ -765,7 +765,7 @@ static void test_loss(void)
 	for (i = 0; i < 255; i++)
 		ep_send(&a, pkt, 0);
 	ep_send(&a, late, 0);
-	assert(ep_recv(&b, late, 40) == BFD_AUTH_OPT_SEQUENCE);
+	assert(ep_recv(&b, late, 40) == BFD_AUTH_OPT_AUTH_KEY);
 	assert(ep_recv(&b, pkt, 40) == BFD_AUTH_OPT_OK);
 	assert(ep_recv(&b, late, 40) == BFD_AUTH_OPT_OK);
 	printf("loss: ok\n");
@@ -774,9 +774,9 @@ static void test_loss(void)
 /*
  * RFC 9986 Section 10.2 takes the first number of a stream to belong to
  * the sequence number the receiver expects next. It does not when signed
- * packets just before it were lost, which the receiver makes up for by
- * looking back; or when a signed packet arrives after the first ISAAC
- * ones were lost, which it cannot make up for.
+ * packets just before it were lost, or when a signed packet arrives after
+ * the first ISAAC ones were lost. The receiver makes up for both by
+ * looking anywhere the stream could have started this time up.
  */
 static void test_first_packet_misplaced(void)
 {
@@ -812,21 +812,9 @@ static void test_first_packet_misplaced(void)
 	assert(xfer(&a, &b, 0) == ISAAC);
 
 	/*
-	 * Back is the only way B looks: the second number of the stream on
-	 * the sequence number of the first is not found.
-	 */
-	setup(&a, &b);
-	bring_up(&a, &b);
-	first_isaac(&a, &b, pkt);
-	ep_send(&a, pkt, 0);
-	put32(pkt + SEQ, a.isaac_first);
-	assert(ep_recv(&b, pkt, 40) == BFD_AUTH_OPT_AUTH_KEY);
-	assert(!b.opt.rx_live);
-
-	/*
-	 * So this one stays out of reach: the first ISAAC ones are lost and
-	 * a signed packet follows. The stream never checks out and only
-	 * signed packets get through.
+	 * The first ISAAC ones are lost and signed packets follow, so the
+	 * stream started before the packet B took last. B goes by its
+	 * having started this time up, and finds it.
 	 */
 	setup(&a, &b);
 	bring_up(&a, &b);
@@ -836,6 +824,43 @@ static void test_first_packet_misplaced(void)
 	for (i = 0; i < 3; i++)
 		assert(xfer(&a, &b, 0) == MCI);
 	ep_send(&a, pkt, 0);
+	assert(pkt[MODE] == ISAAC);
+	assert(ep_recv(&b, pkt, 40) == BFD_AUTH_OPT_OK);
+	assert(b.opt.rx_live && b.opt.rx_base == a.isaac_first);
+	for (i = 0; i < 300; i++)
+		assert(xfer(&a, &b, 0) == ISAAC);
+
+	/*
+	 * A number from further into the stream than there have been
+	 * sequence numbers this time up is not looked for.
+	 */
+	setup(&a, &b);
+	bring_up(&a, &b);
+	first_isaac(&a, &b, pkt);
+	for (i = 0; i < 50; i++)
+		ep_send(&a, pkt, 0);
+	put32(pkt + SEQ, a.isaac_first);
+	assert(ep_recv(&b, pkt, 40) == BFD_AUTH_OPT_AUTH_KEY);
+	assert(!b.opt.rx_live);
+
+	/*
+	 * Nor one from beyond the first page. All of that went by unseen,
+	 * signed packets apart, and the stream stays out of reach: it never
+	 * checks out and only signed packets get through.
+	 */
+	setup(&a, &b);
+	a.detect_mult = b.detect_mult = 255;
+	bring_up(&a, &b);
+	first_isaac(&a, &b, pkt);
+	for (i = 0; i < 300; i++)
+		ep_send(&a, pkt, 0);
+	assert(xfer(&a, &b, POLL) == MCI);
+	for (i = 0; i < 300; i++) {
+		ep_send(&a, pkt, 0);
+		if (pkt[MODE] == ISAAC)
+			break;
+		assert(ep_recv(&b, pkt, 48) == BFD_AUTH_OPT_OK);
+	}
 	assert(pkt[MODE] == ISAAC);
 	assert(ep_recv(&b, pkt, 40) == BFD_AUTH_OPT_AUTH_KEY);
 	assert(!b.opt.rx_live);
