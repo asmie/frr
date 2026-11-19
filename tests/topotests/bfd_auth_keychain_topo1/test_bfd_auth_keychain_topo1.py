@@ -19,12 +19,14 @@ RFC 5880 Section 6.7.2 bounds a simple password at 16 bytes and Section
 6.7.4 a keyed SHA1 key at 20. A key outside those bounds, or one whose
 algorithm bfdd cannot use, leaves the session with no key at all, and a
 session configured to authenticate must then stay down rather than come
-up carrying unauthenticated packets.
+up carrying unauthenticated packets. The same goes for a session whose
+keychain does not exist.
 """
 
 import json
 import os
 import sys
+import time
 
 import pytest
 
@@ -209,6 +211,94 @@ def test_bfd_auth_recovers():
     skip_on_failure()
     use_keychain("kc1")
     set_key("sixteenbyteskey1", "cleartext")
+    expect_authenticated()
+
+
+PEER = {
+    "rt1": "peer 10.0.1.2 local-address 10.0.1.1 interface eth-rt2",
+    "rt2": "peer 10.0.1.1 local-address 10.0.1.2 interface eth-rt1",
+}
+KEY = ["key 1", "key-string sixteenbyteskey1", "cryptographic-algorithm cleartext"]
+# rt1's peer authenticates through profile authp, which names kc3.
+RT1_VIA_PROFILE = [
+    "bfd",
+    "profile authp",
+    "authentication key-chain kc3",
+    "exit",
+    PEER["rt1"],
+    "no authentication key-chain kc1",
+    "profile authp",
+]
+
+
+def configure(rname, commands):
+    "Run `commands`, one per entry, in configuration mode on `rname`."
+    get_topogen().gears[rname].vtysh_cmd("\n".join(["configure terminal"] + commands))
+
+
+def auth_status(rname):
+    output = json.loads(get_topogen().gears[rname].vtysh_cmd("show bfd peers json"))
+    return output[0].get("authentication", {}) if output else {}
+
+
+def tx_count(rname):
+    rtr = get_topogen().gears[rname]
+    output = json.loads(rtr.vtysh_cmd("show bfd peers counters json"))
+    return output[0].get("control-packet-output", 0) if output else 0
+
+
+def expect_silent(rname, seconds=4):
+    """Nothing leaves `rname` for `seconds`, Down packets included.
+
+    A Down session transmits once a second, so a few seconds are enough.
+    """
+    before = tx_count(rname)
+    time.sleep(seconds)
+    assert tx_count(rname) == before, "{} kept transmitting".format(rname)
+
+
+def test_bfd_auth_missing_keychain_stays_down():
+    """A key chain that does not exist must not mean no authentication.
+
+    Both peers stop authenticating and the session comes up in the clear.
+    rt1 is then given a profile naming a chain it does not have; the
+    profile leaf is a plain string, so nothing refuses that. rt1 must stop
+    talking rather than carry on unauthenticated.
+    """
+    skip_on_failure()
+    for rname in ROUTERS:
+        configure(rname, ["bfd", PEER[rname], "no authentication key-chain kc1"])
+    expect_status("up")
+    for rname in ROUTERS:
+        configured = auth_status(rname).get("configured")
+        assert not configured, "{} still authenticates".format(rname)
+
+    configure("rt1", RT1_VIA_PROFILE)
+    expect_status("down")
+    expect_silent("rt1")
+
+
+def test_bfd_auth_keychain_deleted_and_recreated():
+    """The chain is picked up by name when it appears, and dropped when
+    it goes, without falling back to sending in the clear."""
+    skip_on_failure()
+    configure("rt2", ["key chain kc1"] + KEY)
+    configure("rt2", ["bfd", PEER["rt2"], "authentication key-chain kc1"])
+    configure("rt1", ["key chain kc3"] + KEY)
+    configure("rt1", RT1_VIA_PROFILE)
+    expect_authenticated()
+    assert auth_status("rt1").get("key-chain-name") == "kc3"
+
+    configure("rt1", ["no key chain kc3"])
+    expect_status("down")
+    expect_silent("rt1")
+
+    configure("rt1", ["key chain kc3"] + KEY)
+    expect_authenticated()
+
+    configure(
+        "rt1", ["bfd", PEER["rt1"], "no profile authp", "authentication key-chain kc1"]
+    )
     expect_authenticated()
 
 
