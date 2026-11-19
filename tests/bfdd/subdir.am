@@ -20,3 +20,12 @@ tests_bfdd_test_bfd_isaac_CPPFLAGS = $(TESTS_CPPFLAGS)
 tests_bfdd_test_bfd_isaac_LDADD = $(BFDD_TEST_LDADD)
 tests_bfdd_test_bfd_isaac_SOURCES = tests/bfdd/test_bfd_isaac.c
 EXTRA_DIST += tests/bfdd/test_bfd_isaac.py
+
+if BFDD
+check_PROGRAMS += tests/bfdd/test_bfd_auth_opt
+endif
+tests_bfdd_test_bfd_auth_opt_CFLAGS = $(TESTS_CFLAGS)
+tests_bfdd_test_bfd_auth_opt_CPPFLAGS = $(TESTS_CPPFLAGS)
+tests_bfdd_test_bfd_auth_opt_LDADD = $(BFDD_TEST_LDADD)
+tests_bfdd_test_bfd_auth_opt_SOURCES = tests/bfdd/test_bfd_auth_opt.c
+EXTRA_DIST += tests/bfdd/test_bfd_auth_opt.py

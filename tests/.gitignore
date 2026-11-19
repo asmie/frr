@@ -5,6 +5,7 @@ frr-northbound.proto
 frr_northbound*
 .pytest_cache
 /bfdd/test_bfd_auth
+/bfdd/test_bfd_auth_opt
 /bfdd/test_bfd_isaac
 /bgpd/test_allowas_rmap
 /bgpd/test_aspath
