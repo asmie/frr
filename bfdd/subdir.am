@@ -12,6 +12,7 @@ endif
 bfdd_libbfd_a_SOURCES = \
 	bfdd/bfd.c \
 	bfdd/bfd_auth.c \
+	bfdd/bfd_isaac.c \
 	bfdd/bfdd_nb.c \
 	bfdd/bfdd_nb_config.c \
 	bfdd/bfdd_nb_state.c \
@@ -40,6 +41,7 @@ noinst_HEADERS += \
 	bfdd/bfdd_nb.h \
 	bfdd/bfd.h \
 	bfdd/bfd_auth.h \
+	bfdd/bfd_isaac.h \
 	bfdd/bfd_timer.h \
 	bfdd/bfd_trace.h \
 	# end
