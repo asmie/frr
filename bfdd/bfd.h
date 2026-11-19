@@ -122,6 +122,8 @@ enum bfd_auth_type {
 	BFD_AUTH_TYPE_METICULOUS_KEYED_SHA1 = 5,
 };
 
+struct bfd_auth_opt;
+
 /* What keeps a session from running with optimized authentication. */
 enum bfd_auth_opt_hold {
 	BFD_AUTH_OPT_HOLD_NONE = 0,
@@ -484,6 +486,18 @@ struct bfd_session {
 	 */
 	bool auth_optimized;
 	enum bfd_auth_opt_hold auth_opt_hold;
+	/* Its state, for a session that can: see bfd_auth.h. */
+	struct bfd_auth_opt *auth_opt;
+	/*
+	 * The keys it is up with: when they are next looked at, the wall
+	 * clock time their lifetimes allow, and whether one is known gone.
+	 */
+	struct event *auth_opt_keys_ev;
+	time_t auth_opt_keys_from;
+	time_t auth_opt_keys_until;
+	bool auth_opt_keys_gone;
+	/* The key a packet passed with, until that packet has been handled. */
+	const char *auth_opt_rx_key;
 };
 
 struct bfd_diag_str_list {
@@ -745,6 +759,34 @@ extern struct key *bfd_auth_opt_key_find_send(const struct keychain *kc);
 extern struct key *bfd_session_auth_send_key(const struct bfd_session *bs);
 extern enum bfd_auth_opt_hold bfd_auth_opt_hold_reason(const struct bfd_session *bs);
 extern const char *bfd_auth_opt_hold_str(enum bfd_auth_opt_hold hold);
+
+/*
+ * Optimized authentication through the life of a session: configuration
+ * applied, with what the option was before; the session freed, gone up,
+ * and left old_state for Down or AdminDown.
+ */
+void bfd_auth_opt_session_apply(struct bfd_session *bs, bool was_optimized);
+void bfd_auth_opt_session_free(struct bfd_session *bs);
+void bfd_auth_opt_session_up(struct bfd_session *bs);
+void bfd_auth_opt_session_down(struct bfd_session *bs, int old_state);
+
+/*
+ * Add the authentication section to a control packet whose header is in
+ * a buffer of BFD_AUTH_OPT_PKT_MAX bytes, returning its length, or 0 when
+ * there is nothing to send it with. Then, once it has gone out, _sent().
+ */
+size_t bfd_auth_opt_session_build(struct bfd_session *bs, uint8_t *pkt);
+void bfd_auth_opt_session_sent(struct bfd_session *bs);
+
+/*
+ * Check a received packet, returning what is wrong with it or NULL, and
+ * take note of one that passed once the state machine has seen it.
+ */
+const char *bfd_auth_opt_session_verify(struct bfd_session *bs, const struct bfd_pkt *cp);
+void bfd_auth_opt_session_rcvd(struct bfd_session *bs, const struct bfd_pkt *cp);
+
+/* Give a session a local discriminator it has not had before. */
+void bfd_session_renew_discr(struct bfd_session *bs);
 void bs_sbfd_echo_timer_handler(struct bfd_session *bs);
 void bfd_rtt_init(struct bfd_session *bfd);
 int bfd_session_update(struct bfd_session *bs, struct bfd_peer_cfg *bpc);

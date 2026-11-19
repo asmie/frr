@@ -184,6 +184,7 @@ void bfd_session_apply(struct bfd_session *bs)
 {
 	struct bfd_profile *bp;
 	const char *kc_name;
+	bool was_optimized = bs->auth_optimized;
 	uint32_t min_tx = bs->timers.desired_min_tx;
 	uint32_t min_rx = bs->timers.required_min_rx;
 
@@ -275,6 +276,7 @@ void bfd_session_apply(struct bfd_session *bs)
 	bs->auth_meticulous = bs->peer_profile.auth_config.meticulous ||
 			      (bs->profile && bs->profile->auth_config.meticulous);
 	bs->auth_opt_hold = bfd_auth_opt_hold_reason(bs);
+	bfd_auth_opt_session_apply(bs, was_optimized);
 
 	/*
 	 * Warn here rather than per packet. A keychain that is missing or
@@ -282,8 +284,10 @@ void bfd_session_apply(struct bfd_session *bs)
 	 * of quietly running it unauthenticated, so say which keychain it was.
 	 */
 	if (bs->auth_opt_hold != BFD_AUTH_OPT_HOLD_NONE)
-		zlog_warn("BFD: session [%s] cannot use optimized authentication, %s; the session stays down",
-			  bs_to_string(bs), bfd_auth_opt_hold_str(bs->auth_opt_hold));
+		zlog_warn("BFD: session [%s] cannot use optimized authentication, %s%s",
+			  bs_to_string(bs), bfd_auth_opt_hold_str(bs->auth_opt_hold),
+			  bs->bfd_mode == BFD_MODE_TYPE_SBFD_ECHO ? ""
+								  : "; the session stays down");
 	else if (bs->auth_required && !kc_name)
 		zlog_warn("BFD: session [%s] is to use optimized authentication but names no keychain; the session stays down",
 			  bs_to_string(bs));
@@ -585,6 +589,21 @@ static uint32_t ptm_bfd_gen_ID(bool *strong)
 	return session_id;
 }
 
+void bfd_session_renew_discr(struct bfd_session *bs)
+{
+	bool strong;
+	uint32_t id = ptm_bfd_gen_ID(&strong);
+
+	/* One that random() gave is not worth changing for another. */
+	if (!strong && !bs->discr_strong)
+		return;
+
+	bfd_id_delete(bs->discrs.my_discr);
+	bs->discrs.my_discr = id;
+	bs->discr_strong = strong;
+	bfd_id_insert(bs);
+}
+
 void ptm_bfd_start_xmt_timer(struct bfd_session *bfd, bool is_echo)
 {
 	uint64_t jitter, xmt_TO;
@@ -810,6 +829,7 @@ void ptm_bfd_sess_up(struct bfd_session *bfd)
 	bfd->local_diag = 0;
 	bfd->ses_state = PTM_BFD_UP;
 	monotime(&bfd->uptime);
+	bfd_auth_opt_session_up(bfd);
 
 	/* Connection is up, lets negotiate timers. */
 	bfd_set_polling(bfd);
@@ -854,6 +874,7 @@ void ptm_bfd_sess_dn(struct bfd_session *bfd, uint8_t diag, bool notify_admin_do
 	bfd->remote_ses_state = PTM_BFD_ADM_DOWN;
 	bfd->remote_demand_mode = 0;
 	monotime(&bfd->downtime);
+	bfd_auth_opt_session_down(bfd, old_state);
 
 	/*
 	 * Only attempt to send if we have a valid socket:
@@ -1298,6 +1319,7 @@ void bfd_session_free(struct bfd_session *bs)
 	if (bso != NULL)
 		bs_observer_del(bso);
 
+	bfd_auth_opt_session_free(bs);
 	XFREE(MTYPE_BFDD_PROFILE, bs->profile_name);
 	XFREE(MTYPE_BFDD_CONFIG, bs);
 }
@@ -1898,6 +1920,7 @@ void bfd_set_shutdown(struct bfd_session *bs, bool shutdown)
 		bfd_echo_xmttimer_delete(bs);
 
 		/* Change and notify state change. */
+		bfd_auth_opt_session_down(bs, bs->ses_state);
 		bs->ses_state = PTM_BFD_ADM_DOWN;
 		ptm_bfd_notify(bs, bs->ses_state);
 

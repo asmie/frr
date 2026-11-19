@@ -494,6 +494,17 @@ void ptm_bfd_snd(struct bfd_session *bfd, int fbit)
 	cp.timers.required_min_echo = htonl(bfd->timers.required_min_echo_rx);
 
 	/* Authentication Handling */
+	if (bfd->auth_optimized) {
+		memcpy(send_buffer, &cp, BFD_PKT_LEN);
+		packet_len = bfd_auth_opt_session_build(bfd, send_buffer);
+		if (packet_len == 0 || _ptm_bfd_send(bfd, NULL, send_buffer, packet_len) != 0)
+			return;
+
+		bfd_auth_opt_session_sent(bfd);
+		bfd->stats.tx_ctrl_pkt++;
+		return;
+	}
+
 	key = bfd_session_auth_send_key(bfd);
 	if (key)
 		pkt_auth_type = map_keychain_algo_to_bfd_auth_type(key->hash_algo,
@@ -985,6 +996,19 @@ static bool bfd_check_auth(struct bfd_session *bfd, const struct bfd_pkt *cp)
 #ifdef HAVE_STRUCT_SOCKADDR_SA_LEN
 		local_sa.sa_sin6.sin6_len = sizeof(struct sockaddr_in6);
 #endif
+	}
+
+	/* The optimized kind keeps its own state and takes nothing else. */
+	if (bfd->auth_optimized) {
+		const char *why = bfd_auth_opt_session_verify(bfd, cp);
+
+		if (why == NULL)
+			return true;
+
+		cp_debug(CHECK_FLAG(bfd->flags, BFD_SESS_FLAG_MH), &peer_sa, &local_sa,
+			 bfd->ifp ? bfd->ifp->ifindex : 0, bfd->vrf ? bfd->vrf->vrf_id : 0,
+			 "Auth: optimized: %s", why);
+		return false;
 	}
 
 	/* Check current expected auth type to prevent stale cache drops */
@@ -1481,6 +1505,8 @@ void bfd_recv_cb(struct event *t)
 
 	/* State switch from section 6.2. */
 	bs_state_handler(bfd, BFD_GETSTATE(cp->flags));
+	if (bfd->auth_opt)
+		bfd_auth_opt_session_rcvd(bfd, cp);
 
 	/* RFC 5880, Section 6.5: handle POLL/FINAL negotiation sequence. */
 	if (bfd->polling && BFD_GETFBIT(cp->flags)) {
