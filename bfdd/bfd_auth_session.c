@@ -238,15 +238,102 @@ static bool bfd_auth_opt_keys_lost(struct bfd_session *bs)
 	return true;
 }
 
+/*
+ * RFC 9985 Section 5: a session whose packets are mostly not signed has
+ * the peer show now and then that it still has the key, by answering a
+ * signed Poll with a signed Final. One that does not within twice the
+ * time it would take to notice us gone is not the peer any more.
+ */
+enum {
+	REAUTH_IDLE = 0, /* waiting out the interval */
+	REAUTH_DUE,	 /* a Poll is to go out */
+	REAUTH_SENT,	 /* and has, with no Final back yet */
+};
+
+static uint32_t bfd_auth_opt_reauth_interval(const struct bfd_session *bs)
+{
+	if (bs->peer_profile.auth_config.has_reauth_interval)
+		return bs->peer_profile.auth_config.reauth_interval;
+	if (bs->profile && bs->profile->auth_config.has_reauth_interval)
+		return bs->profile->auth_config.reauth_interval;
+	return BFD_AUTH_OPT_REAUTH_DEFAULT;
+}
+
+static void bfd_auth_opt_reauth_timer(struct event *t);
+
+static void bfd_auth_opt_reauth_stop(struct bfd_session *bs)
+{
+	event_cancel(&bs->auth_opt_reauth_ev);
+	bs->auth_opt_reauth_phase = REAUTH_IDLE;
+}
+
+/*
+ * Start on the next interval, cut short by up to a quarter so that the
+ * sessions of a system do not all come due together. The interval is a
+ * day at most, so in milliseconds it fits a long wherever that is 32 bits.
+ */
+static void bfd_auth_opt_reauth_idle(struct bfd_session *bs)
+{
+	bfd_auth_opt_reauth_stop(bs);
+	if (bs->auth_opt_reauth != 0)
+		event_add_timer_msec(master, bfd_auth_opt_reauth_timer, bs,
+				     (long)bs->auth_opt_reauth * (750 + frr_weak_random() % 251),
+				     &bs->auth_opt_reauth_ev);
+}
+
+/*
+ * Give it twice the peer's detection time for our packets, as that is
+ * now: for the Poll to go out, and then again for the Final to come.
+ */
+static void bfd_auth_opt_reauth_wait(struct bfd_session *bs, uint8_t phase)
+{
+	uint64_t usec = 2 * (uint64_t)bs->detect_mult * bs->xmt_TO;
+
+	event_cancel(&bs->auth_opt_reauth_ev);
+	bs->auth_opt_reauth_phase = phase;
+	event_add_timer_msec(master, bfd_auth_opt_reauth_timer, bs, usec / 1000,
+			     &bs->auth_opt_reauth_ev);
+}
+
+static void bfd_auth_opt_reauth_timer(struct event *t)
+{
+	struct bfd_session *bs = EVENT_ARG(t);
+
+	if (bs->ses_state != PTM_BFD_UP)
+		return;
+
+	/* A Poll Sequence already under way will do as well as a new one. */
+	if (bs->auth_opt_reauth_phase == REAUTH_IDLE) {
+		if (!bs->polling)
+			bfd_set_polling(bs);
+		bfd_auth_opt_reauth_wait(bs, REAUTH_DUE);
+		return;
+	}
+
+	zlog_info("BFD: session [%s] was not authenticated again, %s; taking it down",
+		  bs_to_string(bs),
+		  bs->auth_opt_reauth_phase == REAUTH_DUE ? "no Poll could be sent"
+							  : "no signed Final came back");
+	ptm_bfd_sess_dn(bs, BD_CONTROL_EXPIRED, false);
+}
+
 void bfd_auth_opt_session_apply(struct bfd_session *bs, bool was_optimized)
 {
 	bool want = bs->auth_optimized && bs->auth_opt_hold == BFD_AUTH_OPT_HOLD_NONE;
 
+	uint32_t reauth = bfd_auth_opt_reauth_interval(bs);
 	time_t from, until;
 
 	if (want == (bs->auth_opt != NULL) && was_optimized == bs->auth_optimized) {
 		if (!want || !bs->auth_opt->up)
 			return;
+
+		/* A check that is under way is seen through, unless turned off. */
+		if (reauth != bs->auth_opt_reauth) {
+			bs->auth_opt_reauth = reauth;
+			if (reauth == 0 || bs->auth_opt_reauth_phase == REAUTH_IDLE)
+				bfd_auth_opt_reauth_idle(bs);
+		}
 
 		/*
 		 * The chain may be what has changed. Taking the session down
@@ -291,6 +378,7 @@ static void bfd_auth_opt_keys_forget(struct bfd_session *bs)
 void bfd_auth_opt_session_free(struct bfd_session *bs)
 {
 	bfd_auth_opt_keys_forget(bs);
+	bfd_auth_opt_reauth_stop(bs);
 	if (bs->auth_opt == NULL)
 		return;
 
@@ -321,6 +409,9 @@ void bfd_auth_opt_session_up(struct bfd_session *bs)
 	bfd_auth_opt_up(bs->auth_opt, key ? key->index : 0, key ? key->string : NULL,
 			seeded ? &seed : NULL);
 	bfd_auth_opt_keys_recheck(bs);
+
+	bs->auth_opt_reauth = bfd_auth_opt_reauth_interval(bs);
+	bfd_auth_opt_reauth_idle(bs);
 }
 
 void bfd_auth_opt_session_down(struct bfd_session *bs, int old_state)
@@ -329,6 +420,7 @@ void bfd_auth_opt_session_down(struct bfd_session *bs, int old_state)
 		return;
 
 	bfd_auth_opt_keys_forget(bs);
+	bfd_auth_opt_reauth_stop(bs);
 	bfd_auth_opt_reset(bs->auth_opt);
 
 	/*
@@ -394,7 +486,7 @@ size_t bfd_auth_opt_session_build(struct bfd_session *bs, uint8_t *pkt)
 	return bfd_auth_opt_tx_build(bs->auth_opt, pkt, &in);
 }
 
-void bfd_auth_opt_session_sent(struct bfd_session *bs)
+void bfd_auth_opt_session_sent(struct bfd_session *bs, const uint8_t *pkt)
 {
 	uint64_t hold = 0, interval;
 
@@ -417,6 +509,11 @@ void bfd_auth_opt_session_sent(struct bfd_session *bs)
 
 	bs->auth_seq_num++;
 	bfd_auth_opt_tx_commit(bs->auth_opt, bfd_auth_opt_now(), hold);
+
+	/* The Final is waited for from the first Poll that went out. */
+	if (bs->auth_opt_reauth_phase == REAUTH_DUE &&
+	    BFD_GETPBIT(((const struct bfd_pkt *)pkt)->flags))
+		bfd_auth_opt_reauth_wait(bs, REAUTH_SENT);
 }
 
 const char *bfd_auth_opt_session_verify(struct bfd_session *bs, const struct bfd_pkt *cp)
@@ -489,4 +586,9 @@ void bfd_auth_opt_session_rcvd(struct bfd_session *bs, const struct bfd_pkt *cp)
 	/* Its lifetime may be the first to end, or be over already. */
 	if (!pinned && bs->auth_opt->rx_key.set)
 		bfd_auth_opt_keys_recheck(bs);
+
+	/* A Final is always signed, so the peer has shown it has the key. */
+	if (bs->auth_opt_reauth_phase != REAUTH_IDLE && bs->ses_state == PTM_BFD_UP &&
+	    BFD_GETFBIT(cp->flags))
+		bfd_auth_opt_reauth_idle(bs);
 }

@@ -124,6 +124,9 @@ enum bfd_auth_type {
 
 struct bfd_auth_opt;
 
+/* How often a session with optimized authentication is checked again, in seconds. */
+#define BFD_AUTH_OPT_REAUTH_DEFAULT 60
+
 /* What keeps a session from running with optimized authentication. */
 enum bfd_auth_opt_hold {
 	BFD_AUTH_OPT_HOLD_NONE = 0,
@@ -370,6 +373,9 @@ struct bfd_profile {
 		bool meticulous;
 		/* RFC 9986 optimized authentication. */
 		bool optimized;
+		/* Seconds between its signed Polls, where one is set: 0 for none. */
+		bool has_reauth_interval;
+		uint32_t reauth_interval;
 	} auth_config;
 
 	/** Profile list entry. */
@@ -496,6 +502,10 @@ struct bfd_session {
 	time_t auth_opt_keys_from;
 	time_t auth_opt_keys_until;
 	bool auth_opt_keys_gone;
+	/* Authenticating again by Poll: the interval in seconds, and how far along. */
+	uint32_t auth_opt_reauth;
+	uint8_t auth_opt_reauth_phase;
+	struct event *auth_opt_reauth_ev;
 	/* The key a packet passed with, until that packet has been handled. */
 	const char *auth_opt_rx_key;
 };
@@ -776,7 +786,7 @@ void bfd_auth_opt_session_down(struct bfd_session *bs, int old_state);
  * there is nothing to send it with. Then, once it has gone out, _sent().
  */
 size_t bfd_auth_opt_session_build(struct bfd_session *bs, uint8_t *pkt);
-void bfd_auth_opt_session_sent(struct bfd_session *bs);
+void bfd_auth_opt_session_sent(struct bfd_session *bs, const uint8_t *pkt);
 
 /*
  * Check a received packet, returning what is wrong with it or NULL, and

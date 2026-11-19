@@ -500,7 +500,7 @@ void ptm_bfd_snd(struct bfd_session *bfd, int fbit)
 		if (packet_len == 0 || _ptm_bfd_send(bfd, NULL, send_buffer, packet_len) != 0)
 			return;
 
-		bfd_auth_opt_session_sent(bfd);
+		bfd_auth_opt_session_sent(bfd, send_buffer);
 		bfd->stats.tx_ctrl_pkt++;
 		return;
 	}

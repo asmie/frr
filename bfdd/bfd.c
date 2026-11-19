@@ -105,6 +105,8 @@ static void bfd_profile_set_default(struct bfd_profile *bp)
 	memset(bp->auth_config.key_chain_name, 0, sizeof(bp->auth_config.key_chain_name));
 	bp->auth_config.meticulous = false;
 	bp->auth_config.optimized = false;
+	bp->auth_config.has_reauth_interval = false;
+	bp->auth_config.reauth_interval = 0;
 }
 
 struct bfd_profile *bfd_profile_new(const char *name)
