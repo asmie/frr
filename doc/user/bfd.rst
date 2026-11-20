@@ -280,14 +280,86 @@ BFD peers and profiles share the same BFD session configuration commands.
    stays down. It is not brought up unauthenticated, since that would
    leave the link unprotected while the configuration says otherwise.
    ``show bfd peer`` reports authentication as enabled once a key is in
-   effect, and as configured when only the key-chain is. S-BFD is not
-   covered: an initiator sends its packets unauthenticated, and echo
-   packets carry no authentication.
+   effect, and as configured when only the key-chain is. S-BFD does not
+   authenticate: echo packets carry no authentication, and an initiator
+   sends its packets without any, so one that has a key-chain does not
+   come up, as what the reflector returns is refused.
 
 .. clicmd:: authentication algorithm meticulous
 
    Configure peer or profile to use meticulous mode when the key-chain
    is configured with a hmac-sha1 crypto algorithm.
+
+.. clicmd:: authentication optimized
+
+   Configure peer or profile to use the optimized MD5 meticulous keyed
+   ISAAC authentication of :rfc:`9986`, with the procedures of
+   :rfc:`9985`. Both are experimental, and both ends of a session have
+   to use it.
+
+   A session signs its packets with meticulous keyed MD5 until it is
+   up, and whenever it has something new to say: a change of state or
+   of timers, a Poll or a Final. Once both ends have signalled Up for a
+   detection time, the packets in between carry a 32 bit number from
+   the ISAAC generator in place of the digest, which costs next to
+   nothing to make and to check. Such a packet shows who sent it but
+   does not protect its contents, so it is only taken as a repeat of
+   the last signed one.
+
+   The session uses the ``md5`` keys of its key-chain and no others,
+   with a ``key-string`` of 8 to 16 bytes and a key identifier up to
+   255. Like a key-chain, the option asks for authentication: a session
+   that has it and no usable key stays down.
+
+   The keys a session came up with are kept for as long as it is up.
+   When one of them is changed, removed or outside its lifetime the
+   session goes down, and comes back up with what the key-chain holds
+   then. To change a key without the peer seeing a failure, ``shutdown``
+   the session on both sides, change the key, and bring it back with
+   ``no shutdown``.
+
+   The option is not available for S-BFD sessions, with a distributed
+   data plane, with ``demand-mode`` on the local side, or with a
+   ``detect-multiplier`` above 85. It also needs random numbers from
+   the system and, in a build that uses OpenSSL, a provider that allows
+   MD5. A session that cannot use the option stays down, and
+   ``show bfd peers`` says why. The one exception is an S-BFD echo
+   session: its packets carry no authentication of any kind, so it runs
+   as it would without the option, and is not protected by it.
+
+   The local discriminator of such a session, shown as its ID, is a new
+   one each time the session goes down.
+
+   Once it follows the peer's stream, the receiver holds two pages of
+   256 numbers of it, which is room for a run of 256 lost packets and,
+   depending on where in a page the run began, up to 511. A peer that
+   advertises a detect multiplier of about 193 or more can lose more
+   than that in a row without the session timing out. The packets of
+   the stream that follow are then refused, as they are for a stream
+   whose first 256 packets were all lost. A signed packet is followed
+   however far the stream has moved on, so one that arrives in time,
+   such as a Poll, puts that right; otherwise the session times out and
+   comes back up.
+
+.. clicmd:: authentication reauth-interval (0-86400)
+
+   Configure how often, in seconds, a session using optimized
+   authentication has its peer show that it still has the key. The
+   default is 60, and 0 turns it off. A value set on a peer is used in
+   preference to the profile's.
+
+   Each time, the session starts a Poll Sequence, whose packets are
+   always signed. If no Final has come back within twice the time the
+   peer would take to detect the session as lost, the session goes
+   down. The interval is shortened by up to a quarter each time, so
+   that the sessions of a system are not all checked together.
+
+   ``show bfd peers`` reports the interval and, while the session is up,
+   whether the last packet sent and the last one taken were ``signed``
+   or ``isaac``. ``show bfd peers counters`` counts packets by format
+   in each direction, those refused by what was wrong with them, and
+   the times a session went down for want of a Final or for a key it
+   lost.
 
 BFD Peer Specific Commands
 --------------------------
@@ -939,10 +1011,14 @@ Possible example is a simple cryptographic algorithm, which means
 the key string is sent in clear text and will be visible in packet
 captures (e.g., using tcpdump).
 
+With ``authentication optimized`` a session uses the optimized MD5
+meticulous keyed ISAAC authentication of :rfc:`9986` instead, which
+signs the packets that matter and saves the work on the rest.
+
 BFD authentication configuration
 ================================
 
-Here are two examples demonstrating how to configure BFD authentication with a
+Here are three examples demonstrating how to configure BFD authentication with a
 keychain.
 
 Example 1: Applying Authentication via a Profile
@@ -996,6 +1072,39 @@ Create a BFD Profile and Link the Keychain:
    bfd
     profile 0
      authentication key-chain 0
+
+Apply the Profile to the BFD Peer:
+
+.. code-block:: frr
+
+   bfd
+    peer 10.0.1.2 interface eth-rt2
+     profile 0
+
+Example 3: Applying Optimized Authentication via a Profile
+
+This method uses a BFD profile to have several peers use optimized
+authentication, checked again every two minutes. The other end of each
+session needs the same key and the same option.
+
+Define the Keychain and Key:
+
+.. code-block:: frr
+
+   key chain 0
+    key 0
+     key-string secret123456
+     cryptographic-algorithm md5
+
+Create a BFD Profile, Link the Keychain and Enable the Option:
+
+.. code-block:: frr
+
+   bfd
+    profile 0
+     authentication key-chain 0
+     authentication optimized
+     authentication reauth-interval 120
 
 Apply the Profile to the BFD Peer:
 
