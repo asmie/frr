@@ -148,6 +148,10 @@ struct bfd_auth_opt {
 	uint32_t rx_last_seq;
 	uint32_t rx_first_seq;
 	bool rx_first_known;
+	/* Where a stream not yet live may have begun, to be borne out. */
+	bool rx_cand;
+	uint32_t rx_cand_seed;
+	uint32_t rx_cand_base;
 	/* Header of the last signed Up packet, which ISAAC ones must repeat. */
 	uint8_t rx_ref[24];
 	bool rx_ref_valid;
@@ -194,7 +198,8 @@ void bfd_auth_opt_up(struct bfd_auth_opt *opt, uint8_t key_id, const char *key,
 /*
  * Check a received packet whose Auth Type is BFD_AUTH_OPT_MD5; len is the
  * length its header declares. A refused packet changes nothing that
- * counts; at most it leaves its Seed in a generator not yet in use.
+ * counts; at most it leaves its Seed in a generator not yet in use, or a
+ * note of where the stream may have begun.
  */
 enum bfd_auth_opt_result bfd_auth_opt_rx_verify(struct bfd_auth_opt *opt, const uint8_t *pkt,
 						size_t len, const struct bfd_auth_opt_rx *in);

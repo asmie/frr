@@ -262,20 +262,38 @@ static enum bfd_auth_opt_result opt_rx_isaac(struct bfd_auth_opt *opt, const uin
 		 * neither need be so: signed packets may have been lost just
 		 * before the stream started, and it may have started unseen
 		 * before signed packets that did arrive. What is certain is
-		 * that it started after the first packet of this time up. So
-		 * the number is looked for wherever on the first page that
-		 * leaves room for, and where it turns up says where the
-		 * stream began.
+		 * that it started after the first packet of this time up.
+		 *
+		 * So the number is looked for wherever on the first page that
+		 * leaves room for. Found among the packets lost since the
+		 * last one accepted, it says where the stream began. Found
+		 * further back it is only kept in mind: that is a lot of
+		 * places for a made up number to turn up in, so the packet
+		 * is let go and the next has to bear it out.
 		 *
 		 * The generator is seeded in place; it only counts once a number
 		 * checks out, which a made up Seed will not manage.
 		 */
-		span = seq - opt->rx_first_seq;
 		bfd_isaac_seed(&opt->rx_isaac, seed, get32(pkt + HDR_YOUR_DISCR),
 			       (const uint8_t *)key, strlen(key));
-		for (idx = MIN(span, BFD_ISAAC_PAGE) - 1; opt->rx_isaac.rsl[idx] != auth_key; idx--)
-			if (idx == 0)
+
+		idx = seq - opt->rx_cand_base;
+		if (!opt->rx_cand || seed != opt->rx_cand_seed || idx >= BFD_ISAAC_PAGE ||
+		    opt->rx_isaac.rsl[idx] != auth_key) {
+			/* A span of 0 is one of 2^32, and as good as any other. */
+			span = seq - opt->rx_first_seq;
+			for (idx = MIN(span - 1, BFD_ISAAC_PAGE - 1);
+			     opt->rx_isaac.rsl[idx] != auth_key; idx--)
+				if (idx == 0)
+					return BFD_AUTH_OPT_AUTH_KEY;
+
+			if (idx >= step) {
+				opt->rx_cand = true;
+				opt->rx_cand_seed = seed;
+				opt->rx_cand_base = seq - idx;
 				return BFD_AUTH_OPT_AUTH_KEY;
+			}
+		}
 
 		opt->rx_base = seq - idx - BFD_ISAAC_PAGE;
 		opt_rx_flip(opt);

@@ -776,7 +776,8 @@ static void test_loss(void)
  * the sequence number the receiver expects next. It does not when signed
  * packets just before it were lost, or when a signed packet arrives after
  * the first ISAAC ones were lost. The receiver makes up for both by
- * looking anywhere the stream could have started this time up.
+ * looking anywhere the stream could have started this time up, and for
+ * the second at the cost of one more packet.
  */
 static void test_first_packet_misplaced(void)
 {
@@ -814,7 +815,9 @@ static void test_first_packet_misplaced(void)
 	/*
 	 * The first ISAAC ones are lost and signed packets follow, so the
 	 * stream started before the packet B took last. B goes by its
-	 * having started this time up, and finds it.
+	 * having started this time up, and finds the number, but that far
+	 * back there are many places for one to turn up in: the packet is
+	 * let go, and the stream is taken up when the next bears it out.
 	 */
 	setup(&a, &b);
 	bring_up(&a, &b);
@@ -825,10 +828,33 @@ static void test_first_packet_misplaced(void)
 		assert(xfer(&a, &b, 0) == MCI);
 	ep_send(&a, pkt, 0);
 	assert(pkt[MODE] == ISAAC);
-	assert(ep_recv(&b, pkt, 40) == BFD_AUTH_OPT_OK);
+	assert(ep_recv(&b, pkt, 40) == BFD_AUTH_OPT_AUTH_KEY);
+	assert(!b.opt.rx_live);
+
+	/* The same number again, on the next sequence number, does not. */
+	put32(pkt + SEQ, get32(pkt + SEQ) + 1);
+	assert(ep_recv(&b, pkt, 40) == BFD_AUTH_OPT_AUTH_KEY);
+	assert(!b.opt.rx_live);
+
+	/* That put B off, so it takes A two more to be believed. */
+	ep_send(&a, pkt, 0);
+	assert(ep_recv(&b, pkt, 40) == BFD_AUTH_OPT_AUTH_KEY);
+	assert(xfer(&a, &b, 0) == ISAAC);
 	assert(b.opt.rx_live && b.opt.rx_base == a.isaac_first);
 	for (i = 0; i < 300; i++)
 		assert(xfer(&a, &b, 0) == ISAAC);
+
+	/*
+	 * The sequence number has gone all the way round with only signed
+	 * packets seen, so the stream's first packet has the number of the
+	 * first packet of this time up.
+	 */
+	setup(&a, &b);
+	bring_up(&a, &b);
+	first_isaac(&a, &b, pkt);
+	b.opt.rx_first_seq = get32(pkt + SEQ);
+	assert(ep_recv(&b, pkt, 40) == BFD_AUTH_OPT_OK);
+	assert(b.opt.rx_live && b.opt.rx_base == a.isaac_first);
 
 	/*
 	 * A number from further into the stream than there have been
