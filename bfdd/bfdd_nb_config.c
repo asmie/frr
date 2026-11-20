@@ -1492,3 +1492,149 @@ int bfdd_bfd_sessions_sbfd_multi_hop_destroy(struct nb_cb_destroy_args *args)
 {
 	return NB_OK;
 }
+
+/*
+ * The two leaves of RFC 9986 optimized authentication are the same for a
+ * profile and for each kind of session, and so is what setting them or
+ * taking them away comes to.
+ */
+static void bfd_auth_opt_set(struct bfd_profile *bp, const struct lyd_node *dnode, bool optimized)
+{
+	bp->auth_config.optimized = optimized && yang_dnode_get_bool(dnode, NULL);
+}
+
+static void bfd_auth_reauth_set(struct bfd_profile *bp, const struct lyd_node *dnode, bool set)
+{
+	bp->auth_config.has_reauth_interval = set;
+	bp->auth_config.reauth_interval = set ? yang_dnode_get_uint32(dnode, NULL) : 0;
+}
+
+/*
+ * XPath: /frr-bfdd:bfdd/bfd/profile/profile-authentication/authentication-optimized
+ */
+int bfdd_bfd_profile_authentication_optimized_modify(struct nb_cb_modify_args *args)
+{
+	struct bfd_profile *bp;
+
+	if (args->event != NB_EV_APPLY)
+		return NB_OK;
+
+	bp = nb_running_get_entry(args->dnode, NULL, true);
+	bfd_auth_opt_set(bp, args->dnode, true);
+	bfd_profile_update(bp);
+
+	return NB_OK;
+}
+
+int bfdd_bfd_profile_authentication_optimized_destroy(struct nb_cb_destroy_args *args)
+{
+	struct bfd_profile *bp;
+
+	if (args->event != NB_EV_APPLY)
+		return NB_OK;
+
+	bp = nb_running_get_entry(args->dnode, NULL, true);
+	bfd_auth_opt_set(bp, args->dnode, false);
+	bfd_profile_update(bp);
+
+	return NB_OK;
+}
+
+/*
+ * XPath: /frr-bfdd:bfdd/bfd/profile/profile-authentication/authentication-reauth-interval
+ */
+int bfdd_bfd_profile_authentication_reauth_interval_modify(struct nb_cb_modify_args *args)
+{
+	struct bfd_profile *bp;
+
+	if (args->event != NB_EV_APPLY)
+		return NB_OK;
+
+	bp = nb_running_get_entry(args->dnode, NULL, true);
+	bfd_auth_reauth_set(bp, args->dnode, true);
+	bfd_profile_update(bp);
+
+	return NB_OK;
+}
+
+int bfdd_bfd_profile_authentication_reauth_interval_destroy(struct nb_cb_destroy_args *args)
+{
+	struct bfd_profile *bp;
+
+	if (args->event != NB_EV_APPLY)
+		return NB_OK;
+
+	bp = nb_running_get_entry(args->dnode, NULL, true);
+	bfd_auth_reauth_set(bp, args->dnode, false);
+	bfd_profile_update(bp);
+
+	return NB_OK;
+}
+
+/*
+ * XPath: /frr-bfdd:bfdd/bfd/sessions/single-hop/authentication-optimized
+ * XPath: /frr-bfdd:bfdd/bfd/sessions/multi-hop/authentication-optimized
+ * XPath: /frr-bfdd:bfdd/bfd/sessions/sbfd-echo/authentication-optimized
+ * XPath: /frr-bfdd:bfdd/bfd/sessions/sbfd-init/authentication-optimized
+ */
+int bfdd_bfd_sessions_common_authentication_optimized_modify(struct nb_cb_modify_args *args)
+{
+	struct bfd_session *bs;
+
+	if (args->event != NB_EV_APPLY)
+		return NB_OK;
+
+	bs = nb_running_get_entry(args->dnode, NULL, true);
+	bfd_auth_opt_set(&bs->peer_profile, args->dnode, true);
+	bfd_session_apply(bs);
+
+	return NB_OK;
+}
+
+int bfdd_bfd_sessions_common_authentication_optimized_destroy(struct nb_cb_destroy_args *args)
+{
+	struct bfd_session *bs;
+
+	if (args->event != NB_EV_APPLY)
+		return NB_OK;
+
+	bs = nb_running_get_entry(args->dnode, NULL, true);
+	bfd_auth_opt_set(&bs->peer_profile, args->dnode, false);
+	bfd_session_apply(bs);
+
+	return NB_OK;
+}
+
+/*
+ * XPath: /frr-bfdd:bfdd/bfd/sessions/single-hop/authentication-reauth-interval
+ * XPath: /frr-bfdd:bfdd/bfd/sessions/multi-hop/authentication-reauth-interval
+ * XPath: /frr-bfdd:bfdd/bfd/sessions/sbfd-echo/authentication-reauth-interval
+ * XPath: /frr-bfdd:bfdd/bfd/sessions/sbfd-init/authentication-reauth-interval
+ */
+int bfdd_bfd_sessions_common_authentication_reauth_interval_modify(struct nb_cb_modify_args *args)
+{
+	struct bfd_session *bs;
+
+	if (args->event != NB_EV_APPLY)
+		return NB_OK;
+
+	bs = nb_running_get_entry(args->dnode, NULL, true);
+	bfd_auth_reauth_set(&bs->peer_profile, args->dnode, true);
+	bfd_session_apply(bs);
+
+	return NB_OK;
+}
+
+int bfdd_bfd_sessions_common_authentication_reauth_interval_destroy(struct nb_cb_destroy_args *args)
+{
+	struct bfd_session *bs;
+
+	if (args->event != NB_EV_APPLY)
+		return NB_OK;
+
+	bs = nb_running_get_entry(args->dnode, NULL, true);
+	bfd_auth_reauth_set(&bs->peer_profile, args->dnode, false);
+	bfd_session_apply(bs);
+
+	return NB_OK;
+}

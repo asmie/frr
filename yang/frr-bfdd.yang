@@ -52,6 +52,13 @@ module frr-bfdd {
      (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
      OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.";
 
+  revision 2026-11-20 {
+    description "Add optimized authentication leaves";
+    reference
+      "RFC 9985: Optimizing BFD Authentication.
+       RFC 9986: Meticulous Keyed ISAAC for BFD Optimized Authentication.";
+  }
+
   revision 2025-03-03 {
     description "Add log-session-changes leaf";
     reference
@@ -175,6 +182,24 @@ module frr-bfdd {
     leaf authentication-algorithm-meticulous {
       type boolean;
       description "Use meticulous algorithm with SHA-1";
+    }
+
+    leaf authentication-optimized {
+      type boolean;
+      description
+        "Use the optimized MD5 meticulous keyed ISAAC authentication of
+         RFC 9986, with the md5 keys of the key chain";
+    }
+
+    leaf authentication-reauth-interval {
+      type uint32 {
+        range "0..86400";
+      }
+      units seconds;
+      description
+        "How often a session using optimized authentication has its peer
+         show it still has the key, by a Poll Sequence. 0 for never.
+         Without it the profile's is used, and without that 60 seconds";
     }
   }
 
@@ -495,6 +520,24 @@ module frr-bfdd {
           leaf authentication-algorithm-meticulous {
             type boolean;
             description "Use meticulous algorithm with SHA-1";
+          }
+
+          leaf authentication-optimized {
+            type boolean;
+            description
+              "Use the optimized MD5 meticulous keyed ISAAC authentication of
+               RFC 9986, with the md5 keys of the key chain";
+          }
+
+          leaf authentication-reauth-interval {
+            type uint32 {
+              range "0..86400";
+            }
+            units seconds;
+            description
+              "How often a session using optimized authentication has its peer
+               show it still has the key, by a Poll Sequence. 0 for never.
+               Without it the profile's is used, and without that 60 seconds";
           }
         }
       }

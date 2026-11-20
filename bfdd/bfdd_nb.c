@@ -1097,6 +1097,86 @@ const struct frr_yang_module_info frr_bfdd_info = {
 			}
 		},
 		{
+			.xpath = "/frr-bfdd:bfdd/bfd/profile/profile-authentication/authentication-optimized",
+			.cbs = {
+				.modify = bfdd_bfd_profile_authentication_optimized_modify,
+				.destroy = bfdd_bfd_profile_authentication_optimized_destroy,
+				.cli_show = bfd_cli_show_auth_optimized,
+			}
+		},
+		{
+			.xpath = "/frr-bfdd:bfdd/bfd/profile/profile-authentication/authentication-reauth-interval",
+			.cbs = {
+				.modify = bfdd_bfd_profile_authentication_reauth_interval_modify,
+				.destroy = bfdd_bfd_profile_authentication_reauth_interval_destroy,
+				.cli_show = bfd_cli_show_auth_reauth_interval,
+			}
+		},
+		{
+			.xpath = "/frr-bfdd:bfdd/bfd/sessions/single-hop/authentication-optimized",
+			.cbs = {
+				.modify = bfdd_bfd_sessions_common_authentication_optimized_modify,
+				.destroy = bfdd_bfd_sessions_common_authentication_optimized_destroy,
+				.cli_show = bfd_cli_show_auth_optimized,
+			}
+		},
+		{
+			.xpath = "/frr-bfdd:bfdd/bfd/sessions/single-hop/authentication-reauth-interval",
+			.cbs = {
+				.modify = bfdd_bfd_sessions_common_authentication_reauth_interval_modify,
+				.destroy = bfdd_bfd_sessions_common_authentication_reauth_interval_destroy,
+				.cli_show = bfd_cli_show_auth_reauth_interval,
+			}
+		},
+		{
+			.xpath = "/frr-bfdd:bfdd/bfd/sessions/multi-hop/authentication-optimized",
+			.cbs = {
+				.modify = bfdd_bfd_sessions_common_authentication_optimized_modify,
+				.destroy = bfdd_bfd_sessions_common_authentication_optimized_destroy,
+				.cli_show = bfd_cli_show_auth_optimized,
+			}
+		},
+		{
+			.xpath = "/frr-bfdd:bfdd/bfd/sessions/multi-hop/authentication-reauth-interval",
+			.cbs = {
+				.modify = bfdd_bfd_sessions_common_authentication_reauth_interval_modify,
+				.destroy = bfdd_bfd_sessions_common_authentication_reauth_interval_destroy,
+				.cli_show = bfd_cli_show_auth_reauth_interval,
+			}
+		},
+		{
+			.xpath = "/frr-bfdd:bfdd/bfd/sessions/sbfd-echo/authentication-optimized",
+			.cbs = {
+				.modify = bfdd_bfd_sessions_common_authentication_optimized_modify,
+				.destroy = bfdd_bfd_sessions_common_authentication_optimized_destroy,
+				.cli_show = bfd_cli_show_auth_optimized,
+			}
+		},
+		{
+			.xpath = "/frr-bfdd:bfdd/bfd/sessions/sbfd-echo/authentication-reauth-interval",
+			.cbs = {
+				.modify = bfdd_bfd_sessions_common_authentication_reauth_interval_modify,
+				.destroy = bfdd_bfd_sessions_common_authentication_reauth_interval_destroy,
+				.cli_show = bfd_cli_show_auth_reauth_interval,
+			}
+		},
+		{
+			.xpath = "/frr-bfdd:bfdd/bfd/sessions/sbfd-init/authentication-optimized",
+			.cbs = {
+				.modify = bfdd_bfd_sessions_common_authentication_optimized_modify,
+				.destroy = bfdd_bfd_sessions_common_authentication_optimized_destroy,
+				.cli_show = bfd_cli_show_auth_optimized,
+			}
+		},
+		{
+			.xpath = "/frr-bfdd:bfdd/bfd/sessions/sbfd-init/authentication-reauth-interval",
+			.cbs = {
+				.modify = bfdd_bfd_sessions_common_authentication_reauth_interval_modify,
+				.destroy = bfdd_bfd_sessions_common_authentication_reauth_interval_destroy,
+				.cli_show = bfd_cli_show_auth_reauth_interval,
+			}
+		},
+		{
 			.xpath = NULL,
 		},
 	}

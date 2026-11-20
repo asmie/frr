@@ -1055,6 +1055,41 @@ DEFPY_YANG(bfd_peer_auth_meticulous, bfd_peer_auth_meticulous_cmd,
 	return nb_cli_apply_changes(vty, NULL);
 }
 
+DEFPY_YANG(bfd_peer_auth_optimized, bfd_peer_auth_optimized_cmd,
+	   "[no] authentication optimized",
+	   NO_STR
+	   "Configure BFD peer authentication\n"
+	   "Use RFC 9986 optimized authentication with the md5 keys of the key chain\n")
+{
+	nb_cli_enqueue_change(vty, "./authentication-optimized", no ? NB_OP_DESTROY : NB_OP_MODIFY,
+			      no ? NULL : "true");
+	return nb_cli_apply_changes(vty, NULL);
+}
+
+DEFPY_YANG(bfd_peer_auth_reauth_interval, bfd_peer_auth_reauth_interval_cmd,
+	   "[no] authentication reauth-interval ![(0-86400)$interval]",
+	   NO_STR
+	   "Configure BFD peer authentication\n"
+	   "How often optimized authentication has the peer show it has the key\n"
+	   "Seconds, 0 for never\n")
+{
+	nb_cli_enqueue_change(vty, "./authentication-reauth-interval",
+			      no ? NB_OP_DESTROY : NB_OP_MODIFY, no ? NULL : interval_str);
+	return nb_cli_apply_changes(vty, NULL);
+}
+
+void bfd_cli_show_auth_optimized(struct vty *vty, const struct lyd_node *dnode, bool show_defaults)
+{
+	if (yang_dnode_get_bool(dnode, NULL))
+		vty_out(vty, "  authentication optimized\n");
+}
+
+void bfd_cli_show_auth_reauth_interval(struct vty *vty, const struct lyd_node *dnode,
+				       bool show_defaults)
+{
+	vty_out(vty, "  authentication reauth-interval %s\n", yang_dnode_get_string(dnode, NULL));
+}
+
 void bfd_cli_show_auth(struct vty *vty, const struct lyd_node *dnode, bool show_defaults)
 {
 	const char *key_chain = yang_dnode_get_string(dnode, NULL);
@@ -1151,6 +1186,29 @@ DEFPY_YANG(bfd_profile_set_authentication_algorithm_meticulous, bfd_profile_set_
 	}
 	nb_cli_enqueue_change(vty, "./profile-authentication/authentication-algorithm-meticulous",
 			      NB_OP_MODIFY, "true");
+	return nb_cli_apply_changes(vty, NULL);
+}
+
+DEFPY_YANG(bfd_profile_auth_optimized, bfd_profile_auth_optimized_cmd,
+	   "[no] authentication optimized",
+	   NO_STR
+	   "Configure BFD peer authentication\n"
+	   "Use RFC 9986 optimized authentication with the md5 keys of the key chain\n")
+{
+	nb_cli_enqueue_change(vty, "./profile-authentication/authentication-optimized",
+			      no ? NB_OP_DESTROY : NB_OP_MODIFY, no ? NULL : "true");
+	return nb_cli_apply_changes(vty, NULL);
+}
+
+DEFPY_YANG(bfd_profile_auth_reauth_interval, bfd_profile_auth_reauth_interval_cmd,
+	   "[no] authentication reauth-interval ![(0-86400)$interval]",
+	   NO_STR
+	   "Configure BFD peer authentication\n"
+	   "How often optimized authentication has the peer show it has the key\n"
+	   "Seconds, 0 for never\n")
+{
+	nb_cli_enqueue_change(vty, "./profile-authentication/authentication-reauth-interval",
+			      no ? NB_OP_DESTROY : NB_OP_MODIFY, no ? NULL : interval_str);
 	return nb_cli_apply_changes(vty, NULL);
 }
 
@@ -1587,6 +1645,8 @@ bfdd_cli_init(void)
 	install_element(BFD_PEER_NODE, &no_bfd_peer_minimum_ttl_cmd);
 	install_element(BFD_PEER_NODE, &bfd_peer_auth_cmd);
 	install_element(BFD_PEER_NODE, &bfd_peer_auth_meticulous_cmd);
+	install_element(BFD_PEER_NODE, &bfd_peer_auth_optimized_cmd);
+	install_element(BFD_PEER_NODE, &bfd_peer_auth_reauth_interval_cmd);
 
 	/* Profile commands. */
 	cmd_variable_handler_register(bfd_vars);
@@ -1612,4 +1672,6 @@ bfdd_cli_init(void)
 	install_element(BFD_PROFILE_NODE, &no_bfd_profile_minimum_ttl_cmd);
 	install_element(BFD_PROFILE_NODE, &bfd_profile_set_authentication_key_chain_cmd);
 	install_element(BFD_PROFILE_NODE, &bfd_profile_set_authentication_algorithm_meticulous_cmd);
+	install_element(BFD_PROFILE_NODE, &bfd_profile_auth_optimized_cmd);
+	install_element(BFD_PROFILE_NODE, &bfd_profile_auth_reauth_interval_cmd);
 }
