@@ -831,7 +831,11 @@ static void test_first_packet_misplaced(void)
 	assert(ep_recv(&b, pkt, 40) == BFD_AUTH_OPT_AUTH_KEY);
 	assert(!b.opt.rx_live);
 
-	/* The same number again, on the next sequence number, does not. */
+	/* The same packet again does not bear itself out. */
+	assert(ep_recv(&b, pkt, 40) == BFD_AUTH_OPT_AUTH_KEY);
+	assert(!b.opt.rx_live);
+
+	/* Nor does the same number on the next sequence number. */
 	put32(pkt + SEQ, get32(pkt + SEQ) + 1);
 	assert(ep_recv(&b, pkt, 40) == BFD_AUTH_OPT_AUTH_KEY);
 	assert(!b.opt.rx_live);

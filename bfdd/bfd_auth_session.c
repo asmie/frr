@@ -126,7 +126,7 @@ const char *bfd_auth_opt_session_unused(const struct bfd_session *bs)
 	if (kc == NULL)
 		return "the key-chain does not exist";
 	if (bfd_auth_opt_key_find_send(kc) == NULL)
-		return "the key-chain has no md5 key of 8 to 16 bytes to send with";
+		return "the key-chain has no md5 key to send with (8 to 16 bytes, ID up to 255, in its send lifetime)";
 	if (!bs->discr_strong)
 		return "the system has no random numbers to give";
 	if (!bfd_auth_md5_usable())

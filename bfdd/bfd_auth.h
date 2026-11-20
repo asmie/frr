@@ -155,9 +155,13 @@ struct bfd_auth_opt {
 	uint32_t rx_last_seq;
 	uint32_t rx_first_seq;
 	bool rx_first_known;
-	/* Where a stream not yet live may have begun, to be borne out. */
+	/*
+	 * Where a stream not yet live may have begun, to be borne out by a
+	 * packet other than the one that said so.
+	 */
 	bool rx_cand;
 	uint32_t rx_cand_seed;
+	uint32_t rx_cand_seq;
 	uint32_t rx_cand_base;
 	/* Header of the last signed Up packet, which ISAAC ones must repeat. */
 	uint8_t rx_ref[24];

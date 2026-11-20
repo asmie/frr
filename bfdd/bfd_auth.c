@@ -281,7 +281,9 @@ static enum bfd_auth_opt_result opt_rx_isaac(struct bfd_auth_opt *opt, const uin
 		 * last one accepted, it says where the stream began. Found
 		 * further back it is only kept in mind: that is a lot of
 		 * places for a made up number to turn up in, so the packet
-		 * is let go and the next has to bear it out.
+		 * is let go and another has to bear it out, with the number
+		 * that belongs to a sequence number of its own. The same
+		 * packet again proves nothing.
 		 *
 		 * The generator is seeded in place; it only counts once a number
 		 * checks out, which a made up Seed will not manage.
@@ -290,8 +292,8 @@ static enum bfd_auth_opt_result opt_rx_isaac(struct bfd_auth_opt *opt, const uin
 			       (const uint8_t *)key, strlen(key));
 
 		idx = seq - opt->rx_cand_base;
-		if (!opt->rx_cand || seed != opt->rx_cand_seed || idx >= BFD_ISAAC_PAGE ||
-		    opt->rx_isaac.rsl[idx] != auth_key) {
+		if (!opt->rx_cand || seq == opt->rx_cand_seq || seed != opt->rx_cand_seed ||
+		    idx >= BFD_ISAAC_PAGE || opt->rx_isaac.rsl[idx] != auth_key) {
 			/* A span of 0 is one of 2^32, and as good as any other. */
 			span = seq - opt->rx_first_seq;
 			for (idx = MIN(span - 1, BFD_ISAAC_PAGE - 1);
@@ -302,6 +304,7 @@ static enum bfd_auth_opt_result opt_rx_isaac(struct bfd_auth_opt *opt, const uin
 			if (idx >= step) {
 				opt->rx_cand = true;
 				opt->rx_cand_seed = seed;
+				opt->rx_cand_seq = seq;
 				opt->rx_cand_base = seq - idx;
 				return BFD_AUTH_OPT_AUTH_KEY;
 			}
