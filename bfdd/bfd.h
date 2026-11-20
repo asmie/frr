@@ -23,6 +23,7 @@
 #include "lib/keychain.h"
 #include "lib/bfd.h"
 #include "bfdd/bfd_timer.h"
+#include "bfdd/bfd_auth.h"
 
 #ifdef BFD_DEBUG
 #define BFDD_JSON_CONV_OPTIONS (JSON_C_TO_STRING_PRETTY)
@@ -120,9 +121,8 @@ enum bfd_auth_type {
 	BFD_AUTH_TYPE_METICULOUS_KEYED_MD5 = 3,
 	BFD_AUTH_TYPE_KEYED_SHA1 = 4,
 	BFD_AUTH_TYPE_METICULOUS_KEYED_SHA1 = 5,
+	BFD_AUTH_TYPE_OPT_MD5_ISAAC = BFD_AUTH_OPT_MD5, /* RFC 9986 */
 };
-
-struct bfd_auth_opt;
 
 /* How often a session with optimized authentication is checked again, in seconds. */
 #define BFD_AUTH_OPT_REAUTH_DEFAULT 60
@@ -335,6 +335,17 @@ struct bfd_session_stats {
 	uint64_t rx_pkt_authentication_keyed_sha1_mismatch;
 	uint64_t rx_pkt_authentication_keyed_sha1_sequence_error;
 	uint64_t rx_pkt_authentication_keyed_sha1_sequence_meticulous_error;
+	/*
+	 * RFC 9986 optimized authentication: packets by format, those
+	 * refused by what was wrong with them, and sessions taken down.
+	 */
+	uint64_t auth_opt_tx_signed;
+	uint64_t auth_opt_tx_isaac;
+	uint64_t auth_opt_rx_signed;
+	uint64_t auth_opt_rx_isaac;
+	uint64_t auth_opt_rx_refused[BFD_AUTH_OPT_RESULTS];
+	uint64_t auth_opt_reauth_failed;
+	uint64_t auth_opt_keys_lost;
 };
 
 /**
@@ -506,6 +517,9 @@ struct bfd_session {
 	uint32_t auth_opt_reauth;
 	uint8_t auth_opt_reauth_phase;
 	struct event *auth_opt_reauth_ev;
+	/* The format of the last packet sent and taken since Up, for show. */
+	uint8_t auth_opt_tx_mode;
+	uint8_t auth_opt_rx_mode;
 	/* The key a packet passed with, until that packet has been handled. */
 	const char *auth_opt_rx_key;
 };
@@ -769,6 +783,11 @@ extern struct key *bfd_auth_opt_key_find_send(const struct keychain *kc);
 extern struct key *bfd_session_auth_send_key(const struct bfd_session *bs);
 extern enum bfd_auth_opt_hold bfd_auth_opt_hold_reason(const struct bfd_session *bs);
 extern const char *bfd_auth_opt_hold_str(enum bfd_auth_opt_hold hold);
+extern const char *bfd_auth_opt_result_str(enum bfd_auth_opt_result res);
+/* Why a session asking for it is not using it, or NULL if it is. */
+extern const char *bfd_auth_opt_session_unused(const struct bfd_session *bs);
+/* Seconds between the signed Polls of a session, as configured: 0 for none. */
+extern uint32_t bfd_auth_opt_reauth_interval(const struct bfd_session *bs);
 
 /*
  * Optimized authentication through the life of a session: configuration

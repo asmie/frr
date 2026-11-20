@@ -150,6 +150,68 @@ static void _display_peer_header(struct vty *vty, struct bfd_session *bs)
 	vty_out(vty, "\n");
 }
 
+/*
+ * The type a session authenticates with now, or none when it has no key
+ * it can use. For optimized authentication that is not in use, also why.
+ */
+static enum bfd_auth_type _peer_auth_type(const struct bfd_session *bs, const char **unused)
+{
+	const struct key *key;
+
+	*unused = NULL;
+	if (bs->auth_optimized) {
+		*unused = bfd_auth_opt_session_unused(bs);
+		return *unused ? BFD_AUTH_TYPE_RESERVED : BFD_AUTH_TYPE_OPT_MD5_ISAAC;
+	}
+
+	key = bfd_session_auth_send_key(bs);
+	if (key == NULL)
+		return BFD_AUTH_TYPE_RESERVED;
+
+	return map_keychain_algo_to_bfd_auth_type(key->hash_algo, bs->auth_meticulous);
+}
+
+/* The two formats of RFC 9986, and neither before a packet has gone by. */
+static const char *_auth_opt_mode_str(uint8_t mode)
+{
+	if (mode == BFD_AUTH_OPT_MODE_ISAAC)
+		return "isaac";
+	return mode == BFD_AUTH_OPT_MODE_MCI ? "signed" : "none";
+}
+
+static void _display_peer_auth_opt(struct vty *vty, const struct bfd_session *bs,
+				   const char *unused)
+{
+	uint32_t reauth = bfd_auth_opt_reauth_interval(bs);
+
+	if (unused)
+		vty_out(vty, "\t\tOptimized authentication: not in use, %s\n", unused);
+	else if (bs->ses_state == PTM_BFD_UP)
+		vty_out(vty, "\t\tOptimized authentication: sending %s, receiving %s\n",
+			_auth_opt_mode_str(bs->auth_opt_tx_mode),
+			_auth_opt_mode_str(bs->auth_opt_rx_mode));
+
+	if (reauth)
+		vty_out(vty, "\t\tRe-authentication interval: %us\n", reauth);
+	else
+		vty_out(vty, "\t\tRe-authentication: disabled\n");
+}
+
+static void _peer_auth_opt_json(struct json_object *jo, const struct bfd_session *bs,
+				const char *unused)
+{
+	json_object_boolean_add(jo, "optimized", true);
+	if (unused)
+		json_object_string_add(jo, "optimizedUnused", unused);
+	else if (bs->ses_state == PTM_BFD_UP) {
+		json_object_string_add(jo, "optimizedTransmitFormat",
+				       _auth_opt_mode_str(bs->auth_opt_tx_mode));
+		json_object_string_add(jo, "optimizedReceiveFormat",
+				       _auth_opt_mode_str(bs->auth_opt_rx_mode));
+	}
+	json_object_int_add(jo, "reauthInterval", bfd_auth_opt_reauth_interval(bs));
+}
+
 static void _display_peer(struct vty *vty, struct bfd_session *bs)
 {
 	char buf[256];
@@ -157,16 +219,13 @@ static void _display_peer(struct vty *vty, struct bfd_session *bs)
 	uint32_t min = 0;
 	uint32_t avg = 0;
 	uint32_t max = 0;
-	struct key *key = NULL;
+	const char *auth_opt_unused;
 	enum bfd_auth_type auth_type;
 
 	_display_peer_header(vty, bs);
 
-	if (bs->kc)
-		key = bfd_keychain_key_find_active(bs->kc, bs->auth_meticulous);
-	if (key) {
-		auth_type = map_keychain_algo_to_bfd_auth_type(key->hash_algo, bs->auth_meticulous);
-
+	auth_type = _peer_auth_type(bs, &auth_opt_unused);
+	if (auth_type != BFD_AUTH_TYPE_RESERVED) {
 		vty_out(vty, "\t\tAuthentication is enabled");
 		vty_out(vty, " (key-chain-name %s, crypto-used %s%s)\n", bs->kc->name,
 			bfd_auth_type_get_description(auth_type),
@@ -177,6 +236,8 @@ static void _display_peer(struct vty *vty, struct bfd_session *bs)
 	else if (bs->profile && bs->profile->auth_config.key_chain_name[0] != '\0')
 		vty_out(vty, "\t\tAuthentication is configured (key-chain-name %s)\n",
 			bs->profile->auth_config.key_chain_name);
+	if (bs->auth_optimized)
+		_display_peer_auth_opt(vty, bs, auth_opt_unused);
 
 	vty_out(vty, "\t\tID: %u\n", bs->discrs.my_discr);
 	vty_out(vty, "\t\tRemote ID: %u\n", bs->discrs.remote_discr);
@@ -324,17 +385,14 @@ static struct json_object *__display_peer_json(struct bfd_session *bs)
 	uint32_t avg = 0;
 	uint32_t max = 0;
 	struct json_object *auth_jo = json_object_new_object();
-	struct key *key = NULL;
+	const char *auth_opt_unused;
 	enum bfd_auth_type auth_type;
 
 	if (bs->key.ifname[0])
 		json_object_string_add(jo, "interface", bs->key.ifname);
 
-	if (bs->kc)
-		key = bfd_keychain_key_find_active(bs->kc, bs->auth_meticulous);
-
-	if (key) {
-		auth_type = map_keychain_algo_to_bfd_auth_type(key->hash_algo, bs->auth_meticulous);
+	auth_type = _peer_auth_type(bs, &auth_opt_unused);
+	if (auth_type != BFD_AUTH_TYPE_RESERVED) {
 		json_object_boolean_add(auth_jo, "enabled", true);
 		json_object_boolean_add(auth_jo, "configured", true);
 		json_object_string_add(auth_jo, "key-chain-name", bs->kc->name);
@@ -352,8 +410,10 @@ static struct json_object *__display_peer_json(struct bfd_session *bs)
 			json_object_string_add(auth_jo, "key-chain-name",
 					       bs->profile->auth_config.key_chain_name);
 		} else
-			json_object_boolean_add(auth_jo, "configured", false);
+			json_object_boolean_add(auth_jo, "configured", bs->auth_optimized);
 	}
+	if (bs->auth_optimized)
+		_peer_auth_opt_json(auth_jo, bs, auth_opt_unused);
 	json_object_object_add(jo, "authentication", auth_jo);
 
 	json_object_int_add(jo, "id", bs->discrs.my_discr);
@@ -601,8 +661,20 @@ static void _display_all_peers(struct vty *vty, char *vrfname, bool use_json)
 	vty_json(vty, jo);
 }
 
+/*
+ * Whether to show the packets counted by format: for a session with the
+ * option, and for one that had it and still has something counted.
+ */
+static bool _peer_auth_opt_counted(const struct bfd_session *bs)
+{
+	return bs->auth_optimized || bs->stats.auth_opt_rx_signed || bs->stats.auth_opt_rx_isaac ||
+	       bs->stats.auth_opt_tx_signed || bs->stats.auth_opt_tx_isaac;
+}
+
 static void _display_peer_counter(struct vty *vty, struct bfd_session *bs)
 {
+	unsigned int res;
+
 	_display_peer_header(vty, bs);
 
 	/* Ask data plane for updated counters. */
@@ -650,12 +722,47 @@ static void _display_peer_counter(struct vty *vty, struct bfd_session *bs)
 			"\t\tRx Authentication type keyed sha-1 meticulous sequence error: %" PRIu64
 			"\n",
 			bs->stats.rx_pkt_authentication_keyed_sha1_sequence_meticulous_error);
+	if (_peer_auth_opt_counted(bs)) {
+		vty_out(vty,
+			"\t\tOptimized authentication signed packet input: %" PRIu64 " packets\n",
+			bs->stats.auth_opt_rx_signed);
+		vty_out(vty,
+			"\t\tOptimized authentication ISAAC packet input: %" PRIu64 " packets\n",
+			bs->stats.auth_opt_rx_isaac);
+		vty_out(vty,
+			"\t\tOptimized authentication signed packet output: %" PRIu64 " packets\n",
+			bs->stats.auth_opt_tx_signed);
+		vty_out(vty,
+			"\t\tOptimized authentication ISAAC packet output: %" PRIu64 " packets\n",
+			bs->stats.auth_opt_tx_isaac);
+	}
+	for (res = BFD_AUTH_OPT_OK + 1; res < BFD_AUTH_OPT_RESULTS; res++)
+		if (bs->stats.auth_opt_rx_refused[res])
+			vty_out(vty, "\t\tRx Authentication optimized, %s: %" PRIu64 "\n",
+				bfd_auth_opt_result_str(res), bs->stats.auth_opt_rx_refused[res]);
+	if (bs->stats.auth_opt_reauth_failed)
+		vty_out(vty, "\t\tRe-authentication failures: %" PRIu64 "\n",
+			bs->stats.auth_opt_reauth_failed);
+	if (bs->stats.auth_opt_keys_lost)
+		vty_out(vty, "\t\tSession keys lost: %" PRIu64 "\n", bs->stats.auth_opt_keys_lost);
 	vty_out(vty, "\n");
 }
+
+/* What a packet was refused for, as the counters are named in JSON. */
+static const char *const auth_opt_refused_json[BFD_AUTH_OPT_RESULTS] = {
+	[BFD_AUTH_OPT_MALFORMED] = "rxOptimizedMalformed",
+	[BFD_AUTH_OPT_NEEDS_MCI] = "rxOptimizedNotSigned",
+	[BFD_AUTH_OPT_KEY_ID] = "rxOptimizedKeyId",
+	[BFD_AUTH_OPT_SEQUENCE] = "rxOptimizedSequenceError",
+	[BFD_AUTH_OPT_DIGEST] = "rxOptimizedDigestMismatch",
+	[BFD_AUTH_OPT_SEED] = "rxOptimizedSeedChanged",
+	[BFD_AUTH_OPT_AUTH_KEY] = "rxOptimizedAuthKeyMismatch",
+};
 
 static struct json_object *__display_peer_counters_json(struct bfd_session *bs)
 {
 	struct json_object *jo = _peer_json_header(bs);
+	unsigned int res;
 
 	/* Ask data plane for updated counters. */
 	if (bfd_dplane_update_session_counters(bs) == -1) {
@@ -692,6 +799,22 @@ static struct json_object *__display_peer_counters_json(struct bfd_session *bs)
 		json_object_int_add(jo,
 				    "rx-pkt-authentication-keyed-sha1-sequence-meticulous-error",
 				    bs->stats.rx_pkt_authentication_keyed_sha1_sequence_meticulous_error);
+
+	if (_peer_auth_opt_counted(bs)) {
+		json_object_int_add(jo, "optimizedSignedPacketInput", bs->stats.auth_opt_rx_signed);
+		json_object_int_add(jo, "optimizedIsaacPacketInput", bs->stats.auth_opt_rx_isaac);
+		json_object_int_add(jo, "optimizedSignedPacketOutput",
+				    bs->stats.auth_opt_tx_signed);
+		json_object_int_add(jo, "optimizedIsaacPacketOutput", bs->stats.auth_opt_tx_isaac);
+	}
+	for (res = BFD_AUTH_OPT_OK + 1; res < BFD_AUTH_OPT_RESULTS; res++)
+		if (bs->stats.auth_opt_rx_refused[res])
+			json_object_int_add(jo, auth_opt_refused_json[res],
+					    bs->stats.auth_opt_rx_refused[res]);
+	if (bs->stats.auth_opt_reauth_failed)
+		json_object_int_add(jo, "reauthFailures", bs->stats.auth_opt_reauth_failed);
+	if (bs->stats.auth_opt_keys_lost)
+		json_object_int_add(jo, "sessionKeysLost", bs->stats.auth_opt_keys_lost);
 
 	if (bs->bfd_mode == BFD_MODE_TYPE_SBFD_INIT || bs->bfd_mode == BFD_MODE_TYPE_SBFD_ECHO)
 		json_object_int_add(jo, "tx-fail-packet", bs->stats.tx_fail_pkt);
@@ -882,6 +1005,11 @@ static void _clear_peer_counter(struct bfd_session *bs)
 	bs->stats.tx_ctrl_pkt = 0;
 	bs->stats.rx_echo_pkt = 0;
 	bs->stats.tx_echo_pkt = 0;
+	bs->stats.auth_opt_tx_signed = 0;
+	bs->stats.auth_opt_tx_isaac = 0;
+	bs->stats.auth_opt_rx_signed = 0;
+	bs->stats.auth_opt_rx_isaac = 0;
+	memset(bs->stats.auth_opt_rx_refused, 0, sizeof(bs->stats.auth_opt_rx_refused));
 }
 
 static void _display_peer_brief(struct vty *vty, struct bfd_session *bs)

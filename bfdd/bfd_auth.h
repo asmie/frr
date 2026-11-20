@@ -33,6 +33,12 @@ bool bfd_auth_md5_sign(uint8_t *pkt, size_t len, const char *key);
 bool bfd_auth_md5_verify(const uint8_t *pkt, size_t len, const char *key);
 
 /*
+ * Whether MD5 can be had at all. An OpenSSL provider may refuse it, in
+ * which case nothing can be signed or checked however good the key.
+ */
+bool bfd_auth_md5_usable(void);
+
+/*
  * RFC 5880 Section 6.7.3/6.7.4: once a sequence number is known, the next
  * must lie within bfd.RcvAuthSeq to bfd.RcvAuthSeq + 3 * Detect Mult, one
  * past that for the meticulous variants, in circular 32 bit space.
@@ -85,6 +91,7 @@ enum bfd_auth_opt_result {
 	BFD_AUTH_OPT_SEED,
 	BFD_AUTH_OPT_AUTH_KEY,
 };
+#define BFD_AUTH_OPT_RESULTS (BFD_AUTH_OPT_AUTH_KEY + 1)
 
 /*
  * A key held for as long as the session stays up: RFC 9986 Section 8. Only

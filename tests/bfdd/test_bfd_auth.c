@@ -157,11 +157,13 @@ int main(int argc, char **argv)
 		memcpy(pkt, keyed, PKT_LEN);
 		assert(!bfd_auth_md5_sign(pkt, PKT_LEN, KEYED_KEY));
 		assert(!bfd_auth_md5_verify(keyed, PKT_LEN, KEYED_KEY));
+		assert(!bfd_auth_md5_usable());
 		printf("MD5 refused by the crypto provider: digests not tested\n");
 		test_window();
 		return 0;
 	}
 
+	assert(bfd_auth_md5_usable());
 	test_digests();
 	test_verify_failures();
 	test_short_packet();

@@ -670,6 +670,8 @@ const char *bfd_auth_type_get_description(enum bfd_auth_type auth_type)
 		return "meticulous keyed-sha1";
 	case BFD_AUTH_TYPE_KEYED_SHA1:
 		return "keyed-sha1";
+	case BFD_AUTH_TYPE_OPT_MD5_ISAAC:
+		return "optimized md5 meticulous keyed-isaac";
 	case BFD_AUTH_TYPE_RESERVED:
 		return "none";
 	}

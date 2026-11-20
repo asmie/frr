@@ -111,7 +111,30 @@ const char *bfd_auth_opt_hold_str(enum bfd_auth_opt_hold hold)
 	return "none";
 }
 
-static const char *bfd_auth_opt_result_str(enum bfd_auth_opt_result res)
+const char *bfd_auth_opt_session_unused(const struct bfd_session *bs)
+{
+	const char *name = bfd_session_auth_key_chain_name(bs);
+	const struct keychain *kc;
+
+	if (bs->auth_opt_hold != BFD_AUTH_OPT_HOLD_NONE)
+		return bfd_auth_opt_hold_str(bs->auth_opt_hold);
+	if (name == NULL)
+		return "no key-chain is configured";
+
+	/* Looked up here: one with no key in it yet is not told to us. */
+	kc = keychain_lookup(name);
+	if (kc == NULL)
+		return "the key-chain does not exist";
+	if (bfd_auth_opt_key_find_send(kc) == NULL)
+		return "the key-chain has no md5 key of 8 to 16 bytes to send with";
+	if (!bs->discr_strong)
+		return "the system has no random numbers to give";
+	if (!bfd_auth_md5_usable())
+		return "the crypto library refuses MD5";
+	return NULL;
+}
+
+const char *bfd_auth_opt_result_str(enum bfd_auth_opt_result res)
 {
 	switch (res) {
 	case BFD_AUTH_OPT_OK:
@@ -193,6 +216,7 @@ static void bfd_auth_opt_keys_check(struct event *t)
 		/* RFC 5880 has no diagnostic for this, so it goes in the log. */
 		zlog_info("BFD: session [%s] lost a key it came up with, taking it down",
 			  bs_to_string(bs));
+		bs->stats.auth_opt_keys_lost++;
 		ptm_bfd_sess_dn(bs, BD_OK, false);
 		return;
 	}
@@ -200,13 +224,15 @@ static void bfd_auth_opt_keys_check(struct event *t)
 	bs->auth_opt_keys_gone = false;
 
 	/*
-	 * Look again once the first of the lifetimes is over. The timer does
-	 * not follow the wall clock the lifetimes are in, which is why the
-	 * bounds are kept: bfd_auth_opt_keys_lost() goes by them.
+	 * Look again once the first of the lifetimes is over, and once a day
+	 * until then. The timer does not follow the wall clock the lifetimes
+	 * are in, which is why the bounds are kept as well:
+	 * bfd_auth_opt_keys_lost() goes by them.
 	 */
 	if (bs->auth_opt_keys_until != 0)
 		event_add_timer(master, bfd_auth_opt_keys_check, bs,
-				bs->auth_opt_keys_until - now + 1, &bs->auth_opt_keys_ev);
+				MIN(bs->auth_opt_keys_until - now + 1, ONE_DAY_SECOND),
+				&bs->auth_opt_keys_ev);
 }
 
 /* Not done on the spot: the callers are in the middle of other things. */
@@ -250,7 +276,7 @@ enum {
 	REAUTH_SENT,	 /* and has, with no Final back yet */
 };
 
-static uint32_t bfd_auth_opt_reauth_interval(const struct bfd_session *bs)
+uint32_t bfd_auth_opt_reauth_interval(const struct bfd_session *bs)
 {
 	if (bs->peer_profile.auth_config.has_reauth_interval)
 		return bs->peer_profile.auth_config.reauth_interval;
@@ -314,6 +340,7 @@ static void bfd_auth_opt_reauth_timer(struct event *t)
 		  bs_to_string(bs),
 		  bs->auth_opt_reauth_phase == REAUTH_DUE ? "no Poll could be sent"
 							  : "no signed Final came back");
+	bs->stats.auth_opt_reauth_failed++;
 	ptm_bfd_sess_dn(bs, BD_CONTROL_EXPIRED, false);
 }
 
@@ -422,6 +449,7 @@ void bfd_auth_opt_session_down(struct bfd_session *bs, int old_state)
 	bfd_auth_opt_keys_forget(bs);
 	bfd_auth_opt_reauth_stop(bs);
 	bfd_auth_opt_reset(bs->auth_opt);
+	bs->auth_opt_tx_mode = bs->auth_opt_rx_mode = 0;
 
 	/*
 	 * What the peer sends is tied to our discriminator, and a signed
@@ -510,6 +538,12 @@ void bfd_auth_opt_session_sent(struct bfd_session *bs, const uint8_t *pkt)
 	bs->auth_seq_num++;
 	bfd_auth_opt_tx_commit(bs->auth_opt, bfd_auth_opt_now(), hold);
 
+	bs->auth_opt_tx_mode = pkt[BFD_PKT_LEN + SEC_MODE];
+	if (bs->auth_opt_tx_mode == BFD_AUTH_OPT_MODE_ISAAC)
+		bs->stats.auth_opt_tx_isaac++;
+	else
+		bs->stats.auth_opt_tx_signed++;
+
 	/* The Final is waited for from the first Poll that went out. */
 	if (bs->auth_opt_reauth_phase == REAUTH_DUE &&
 	    BFD_GETPBIT(((const struct bfd_pkt *)pkt)->flags))
@@ -528,8 +562,10 @@ const char *bfd_auth_opt_session_verify(struct bfd_session *bs, const struct bfd
 
 	if (bs->auth_opt == NULL)
 		return "not available to the session";
-	if (!CHECK_FLAG(cp->flags, BFD_ABIT) || cp->len < BFD_PKT_LEN + BFD_AUTH_ISAAC_LEN)
+	if (!CHECK_FLAG(cp->flags, BFD_ABIT) || cp->len < BFD_PKT_LEN + BFD_AUTH_ISAAC_LEN) {
+		bs->stats.auth_opt_rx_refused[BFD_AUTH_OPT_MALFORMED]++;
 		return bfd_auth_opt_result_str(BFD_AUTH_OPT_MALFORMED);
+	}
 
 	if (in.local_up) {
 		if (bfd_auth_opt_keys_lost(bs))
@@ -561,8 +597,16 @@ const char *bfd_auth_opt_session_verify(struct bfd_session *bs, const struct bfd
 		in.key = bfd_auth_opt_accept_key(bs, sec[SEC_KEY_ID]);
 
 	res = bfd_auth_opt_rx_verify(bs->auth_opt, pkt, cp->len, &in);
-	if (res != BFD_AUTH_OPT_OK)
+	if (res != BFD_AUTH_OPT_OK) {
+		bs->stats.auth_opt_rx_refused[res]++;
 		return bfd_auth_opt_result_str(res);
+	}
+
+	bs->auth_opt_rx_mode = sec[SEC_MODE];
+	if (bs->auth_opt_rx_mode == BFD_AUTH_OPT_MODE_ISAAC)
+		bs->stats.auth_opt_rx_isaac++;
+	else
+		bs->stats.auth_opt_rx_signed++;
 
 	memcpy(&bs->auth_last_rx_seq_num, sec + 4, sizeof(bs->auth_last_rx_seq_num));
 	bs->auth_last_rx_seq_num = ntohl(bs->auth_last_rx_seq_num);

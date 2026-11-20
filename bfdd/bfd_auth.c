@@ -99,6 +99,18 @@ bool bfd_auth_md5_verify(const uint8_t *pkt, size_t len, const char *key)
 	return diff == 0;
 }
 
+bool bfd_auth_md5_usable(void)
+{
+	uint8_t pkt[BFD_AUTH_HDR_LEN + BFD_AUTH_MD5_LEN] = {};
+	static int usable = -1;
+
+	/* What the provider allows does not change while we run. */
+	if (usable < 0)
+		usable = bfd_auth_md5_sign(pkt, sizeof(pkt), "probe");
+
+	return usable;
+}
+
 /*
  * RFC 9986 optimized MD5 meticulous keyed ISAAC authentication.
  */
